@@ -112,16 +112,33 @@ def _patch_bottomnav_kivy22():
     ObservableDict.__getattr__ 对缺失属性调用 super().__getattr__（object 无此
     方法）→ AttributeError: 'super' object has no attribute '__getattr__'。
     牛门线未使用底部导航，故此组合缺陷此前未暴露。
-    处理：构造期把访问 ids 的处理器置为 no-op；配色在 nav 构建后手动设置到
+
+    处理：定义 SafeBottomNav 子类覆写这些处理器为 no-op（对 Kivy 两种
+    on_<prop> 绑定机制均生效）；配色在 nav 构建后手动设置到
     MDBottomNavigationHeader（类属性），与处理器原行为一致。
     """
     try:
         from kivymd.uix.bottomnavigation import MDBottomNavigation
-        for name in ("on_font_name", "on_selected_color_background",
-                     "on_use_text", "on_text_color_normal", "on_text_color_active"):
-            setattr(MDBottomNavigation, name, lambda self, *a, **k: None)
+
+        class SafeBottomNav(MDBottomNavigation):
+            def on_font_name(self, *a, **k):
+                pass
+
+            def on_selected_color_background(self, *a, **k):
+                pass
+
+            def on_use_text(self, *a, **k):
+                pass
+
+            def on_text_color_normal(self, *a, **k):
+                pass
+
+            def on_text_color_active(self, *a, **k):
+                pass
+
+        _patch_bottomnav_kivy22.SafeBottomNav = SafeBottomNav
     except Exception:  # noqa: BLE001
-        pass
+        _patch_bottomnav_kivy22.SafeBottomNav = None
 
 
 _patch_bottomnav_kivy22()
@@ -201,8 +218,9 @@ class NiumenApp(MDApp):
         )
         root.add_widget(self.topbar)
 
-        # 底部导航 + 四页
-        nav = MDBottomNavigation(
+        # 底部导航 + 四页（SafeBottomNav：规避 Kivy 2.2.0 下 on_<prop> 访问未构建 ids 的崩溃）
+        nav_cls = getattr(_patch_bottomnav_kivy22, "SafeBottomNav", None) or MDBottomNavigation
+        nav = nav_cls(
             selected_color_background=get_color_from_hex("#1f3a5f"),
             text_color_active=(1, 1, 1, 1),
             text_color_normal=(0.62, 0.66, 0.72, 1),
