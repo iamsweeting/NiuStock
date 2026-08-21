@@ -1,0 +1,28 @@
+# 构建产物
+bin/
+.buildozer/
+.pytmp/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# 虚拟环境
+.venv/
+venv/
+
+# 中文字体（由 tools/fetch_fonts.sh 在 CI 中下载，不入库）
+app/assets/fonts/*.otf
+app/assets/fonts/*.ttf
+app/assets/fonts/*.ttc
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db

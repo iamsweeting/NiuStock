@@ -1,0 +1,161 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Unit tests (指标/判读/解析)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: Run tests
+        run: python -m pytest tests -v
+
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Buildozer global
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildozer
+          # key 含 -py310-v3- 标记：旧缓存含 Python 3.14 时代的 p4a 环境/hostpython3，
+          # 恢复会导致版本不匹配等错误复现；每次切换 Python 版本都需升级该标记（v3/v4/...）。
+          key: ${{ runner.os }}-buildozer-py310-v3-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            ${{ runner.os }}-buildozer-py310-v3-
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle
+          key: ${{ runner.os }}-gradle-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache
+          key: ${{ runner.os }}-pip-cache
+
+      - name: Download CJK fonts
+        run: bash tools/fetch_fonts.sh
+
+      - name: Prepare cache dirs
+        run: mkdir -p ~/.buildozer ~/.gradle ~/.cache ~/.local
+
+      # dl.google.com 的 NDK/SDK 大文件下载在 Actions 上偶发 502，这里预下载并
+      # 解压到 buildozer 期望的位置（platform/android-ndk-r27b、platform/android-sdk），
+      # docker 构建直接复用（curl 带重试/断点续传）。
+      - name: Pre-download Android NDK/SDK into buildozer cache
+        run: |
+          set -e
+          mkdir -p ~/.buildozer/android/platform
+          cd ~/.buildozer/android/platform
+          dl_retry() {
+            local url="$1" out="$2"
+            for i in 1 2 3 4 5 6 7 8; do
+              echo "下载 $out (尝试 $i): $url"
+              if curl -fL --retry 3 --retry-delay 5 -C - -o "$out" "$url"; then
+                echo "OK: $out ($(du -h "$out" | cut -f1))"
+                return 0
+              fi
+              sleep 10
+            done
+            echo "FAILED: $out"
+            return 1
+          }
+          # NDK r27b -> 解压到 android-ndk-r27b（buildozer 检查该目录）
+          if [ ! -d "$HOME/.buildozer/android/platform/android-ndk-r27b" ]; then
+            dl_retry \
+              "https://dl.google.com/android/repository/android-ndk-r27b-linux.zip" \
+              "$HOME/.buildozer/android/platform/ndk-tmp.zip"
+            unzip -q "$HOME/.buildozer/android/platform/ndk-tmp.zip" -d "$HOME/.buildozer/android/platform/"
+            rm -f "$HOME/.buildozer/android/platform/ndk-tmp.zip"
+            echo "NDK 解压完成"
+          fi
+          # commandline-tools -> 解压到 android-sdk/cmdline-tools/latest
+          if [ ! -d "$HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest" ]; then
+            dl_retry \
+              "https://dl.google.com/android/repository/commandlinetools-linux-6514223_latest.zip" \
+              "$HOME/.buildozer/android/platform/sdk-tmp.zip"
+            mkdir -p "$HOME/.buildozer/android/platform/android-sdk/cmdline-tools"
+            unzip -q "$HOME/.buildozer/android/platform/sdk-tmp.zip" \
+              -d "$HOME/.buildozer/android/platform/android-sdk/cmdline-tools/"
+            # zip 解压出的顶层目录名不固定，取唯一子目录作为 latest
+            inner="$(ls -d "$HOME/.buildozer/android/platform/android-sdk/cmdline-tools/"*/ | head -1)"
+            if [ -n "$inner" ] && [ "$inner" != "$HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/" ]; then
+              mv "$inner" "$HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest"
+            fi
+            rm -f "$HOME/.buildozer/android/platform/sdk-tmp.zip"
+            echo "SDK tools 解压完成: $(ls "$HOME/.buildozer/android/platform/android-sdk/cmdline-tools/")"
+          fi
+          # buildozer 期望旧版布局 sdkmanager 在 android-sdk/tools/bin/，兼容复制
+          if [ -f "$HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/bin/sdkmanager" ] \
+             && [ ! -f "$HOME/.buildozer/android/platform/android-sdk/tools/bin/sdkmanager" ]; then
+            mkdir -p "$HOME/.buildozer/android/platform/android-sdk/tools"
+            cp -r "$HOME/.buildozer/android/platform/android-sdk/cmdline-tools/latest/." \
+                  "$HOME/.buildozer/android/platform/android-sdk/tools/"
+            echo "sdkmanager 已复制到 tools/bin"
+          fi
+          # freetype 等 recipe 源码由 tools/docker_build.sh 在容器内预下载到
+          # p4a packages 缓存（见该脚本 5.5 节），此处无需处理。
+        timeout-minutes: 40
+
+      - name: Build APK via buildozer docker
+        run: |
+          # 容器内执行 tools/docker_build.sh（经 $PWD 挂载可见）：
+          #   自动选择 3.10-3.12 Python 建独立 venv -> 装最新 buildozer+cython+pip<24
+          #   -> 把 buildozer.spec 的 python3 钉版动态改为该 Python 确切版本（消除
+          #      hostpython3 版本不匹配）-> 清理镜像预置旧 python 产物 -> 构建。
+          # 注：p4a 下载依赖源码（SDK/NDK/freetype 等）偶发 502 Bad Gateway，
+          # 故外层重试整轮构建（缓存保留，重试只补缺的下载）。
+          set +e
+          ok=0
+          for attempt in 1 2 3 4 5; do
+            echo "===== build attempt $attempt ====="
+            sudo docker run --rm \
+              --entrypoint /bin/bash \
+              -v "$PWD":/home/user/hostcwd \
+              -v "$HOME/.buildozer":/root/.buildozer \
+              -v "$HOME/.buildozer":/home/user/.buildozer \
+              -v "$HOME/.gradle":/root/.gradle \
+              -v "$HOME/.cache":/root/.cache \
+              --workdir /home/user/hostcwd \
+              kivy/buildozer:latest \
+              -c 'bash tools/docker_build.sh'
+            if [ $? -eq 0 ] && ls bin/*.apk >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            echo "===== attempt $attempt failed, retrying ====="
+          done
+          set -e
+          if [ "$ok" != "1" ]; then
+            echo "ALL BUILD ATTEMPTS FAILED"
+            exit 1
+          fi
+        timeout-minutes: 180
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nstock-apk
+          path: bin/*.apk
+          if-no-files-found: error
