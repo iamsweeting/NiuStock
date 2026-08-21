@@ -103,6 +103,29 @@ def _disable_kivymd_elevation_shadows():
 
 _disable_kivymd_elevation_shadows()
 
+
+def _patch_bottomnav_kivy22():
+    """KivyMD 1.1.1 MDBottomNavigation 在 Kivy 2.2.0 下构造即崩溃的规避。
+
+    根因：各 on_<prop> 处理器（on_text_color_normal 等）在属性默认值派发时
+    访问 self.ids.tab_bar，而构造阶段 ids 尚未由 kv 构建；Kivy 2.2.0 的
+    ObservableDict.__getattr__ 对缺失属性调用 super().__getattr__（object 无此
+    方法）→ AttributeError: 'super' object has no attribute '__getattr__'。
+    牛门线未使用底部导航，故此组合缺陷此前未暴露。
+    处理：构造期把访问 ids 的处理器置为 no-op；配色在 nav 构建后手动设置到
+    MDBottomNavigationHeader（类属性），与处理器原行为一致。
+    """
+    try:
+        from kivymd.uix.bottomnavigation import MDBottomNavigation
+        for name in ("on_font_name", "on_selected_color_background",
+                     "on_use_text", "on_text_color_normal", "on_text_color_active"):
+            setattr(MDBottomNavigation, name, lambda self, *a, **k: None)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_patch_bottomnav_kivy22()
+
 SPLASH_MIN_SEC = 1.8        # 品牌启动页最短停留（需求确认：1~2 秒）
 SPLASH_MAX_SEC = 30.0       # 兜底：最迟移除
 
@@ -191,6 +214,15 @@ class NiumenApp(MDApp):
         nav.add_widget(self._build_market_tab())
         # 页面切换：进入大盘信息页时自动刷新（TTL 冷却，低请求量防反爬）
         nav.bind(on_switch_tabs=self._on_switch_tabs)
+        # 手动应用底部导航配色（on_<prop> 处理器已被补丁禁用，见 _patch_bottomnav_kivy22）
+        try:
+            from kivymd.uix.bottomnavigation import MDBottomNavigationHeader
+            MDBottomNavigationHeader.text_color_normal = (0.62, 0.66, 0.72, 1)
+            MDBottomNavigationHeader.text_color_active = (1, 1, 1, 1)
+            MDBottomNavigationHeader.selected_color_background = get_color_from_hex("#1f3a5f")
+            MDBottomNavigationHeader.panel_color = get_color_from_hex("#0d1b2a")
+        except Exception:  # noqa: BLE001
+            pass
         root.add_widget(nav)
 
         # 加载蒙层（全屏半透明，位于导航之上）

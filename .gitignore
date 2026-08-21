@@ -3,6 +3,12 @@ bin/
 .buildozer/
 .pytmp/
 
+# 本地部署/调试产物（不入库）
+*.apk
+*.log
+nstock_ui.xml
+.deploy_nstock.py
+
 # Python
 __pycache__/
 *.pyc
