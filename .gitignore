@@ -9,6 +9,9 @@ bin/
 nstock_ui.xml
 .deploy_nstock.py
 
+# 本地临时脚本（点开头 .py）
+.*.py
+
 # Python
 __pycache__/
 *.pyc
