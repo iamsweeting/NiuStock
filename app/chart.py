@@ -15,10 +15,16 @@ from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 
 from . import config
+from .geometry import map_y
 
 
 class NMLChart(Widget):
-    """K线（红涨绿跌）+ NML/QRL/SMX(+CBX20/CBX60) 指标线。"""
+    """K线（红涨绿跌）+ NML/QRL/SMX(+CBX20/CBX60) 指标线。
+
+    坐标方向：价格越高绘制位置越靠上（Y(p) 随价格增大而减小，
+    即高值在图上方面——与人类习惯一致）。
+    右上/右下各有一个最高/最低价标签，方便核对方向。
+    """
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -28,6 +34,19 @@ class NMLChart(Widget):
         self._lines = []      # [(标签, 颜色, [DISPLAY_POINTS 个数值])]
         self._last_idx = 0    # 选中日（窗口内下标）
         self.bind(pos=self._redraw, size=self._redraw)
+        # 价格轴标签（普通 Label 控件，不受 canvas 变换问题影响）
+        self.hi_label = Label(
+            text="", font_size=dp(9), color=(0.68, 0.70, 0.76, 1),
+            size_hint=(None, None), size=(dp(72), dp(14)),
+            halign="right", valign="middle",
+        )
+        self.lo_label = Label(
+            text="", font_size=dp(9), color=(0.68, 0.70, 0.76, 1),
+            size_hint=(None, None), size=(dp(72), dp(14)),
+            halign="right", valign="middle",
+        )
+        self.add_widget(self.hi_label)
+        self.add_widget(self.lo_label)
 
     def set_data(self, bars, lines, last_idx):
         self._bars = list(bars)
@@ -61,9 +80,14 @@ class NMLChart(Widget):
         pad = (hi - lo) * 0.08
         lo -= pad
         hi += pad
+        # 最高/最低价标签：高值标签在右上、低值标签在右下
+        self.hi_label.text = "高 %.2f" % hi
+        self.lo_label.text = "低 %.2f" % lo
+        self.hi_label.pos = (self.x + self.width - dp(78), self.y + self.height - dp(15))
+        self.lo_label.pos = (self.x + self.width - dp(78), self.y + dp(1))
 
         def Y(p):
-            return pad_t + (hi - p) / (hi - lo) * plot_h
+            return map_y(p, lo, hi, pad_t, plot_h)
 
         n = len(self._bars)
         step = plot_w / n

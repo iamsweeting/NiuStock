@@ -15,6 +15,7 @@ import time
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
 from kivy.graphics import Color, Rectangle
+from kivy.lang import Builder
 from kivy.metrics import dp
 from kivy.resources import resource_find
 from kivy.uix.floatlayout import FloatLayout
@@ -144,6 +145,84 @@ def _patch_bottomnav_kivy22():
 
 _patch_bottomnav_kivy22()
 
+# KivyMD 1.1.1 底部导航 Header 的标签在选中放大时会向上顶到图标；
+# 覆盖其 kv 规则：标签固定在底部、字号封顶，保证不与图标重叠。
+Builder.load_string("""
+<MDBottomNavigationHeader>
+    md_bg_color: root.panel_color
+    on_press: self.tab.dispatch("on_tab_press")
+    on_release: self.tab.dispatch("on_tab_release")
+    on_touch_down: self.tab.dispatch("on_tab_touch_down", *args)
+    on_touch_move: self.tab.dispatch("on_tab_touch_move", *args)
+    on_touch_up: self.tab.dispatch("on_tab_touch_up", *args)
+    width:
+        root.panel.width / len(root.panel.ids.tab_manager.screens) \\
+        if len(root.panel.ids.tab_manager.screens) != 0 \\
+        else root.panel.width
+    padding:
+        0, "12dp", 0, "12dp" if app.theme_cls.material_style == "M2" else "16dp"
+
+    RelativeLayout:
+        id: item_container
+
+        MDIcon:
+            id: _label_icon
+            icon: root.tab.icon
+            height: self.height
+            badge_icon: root.tab.badge_icon
+            theme_text_color: "Custom"
+            text_color: root._text_color_normal
+            opposite_colors: root.opposite_colors
+            pos: [self.pos[0], self.pos[1]]
+            font_size: "24dp"
+            y: item_container.height - self.height
+            pos_hint:
+                {"center_x": .5, "center_y": .5} \\
+                if not root.panel.use_text else \\
+                {"center_x": .5, "top": 1}
+            on_icon:
+                if self.icon not in md_icons.keys(): \\
+                self.size_hint = (None, None); \\
+                self.width = self.font_size; \\
+                self.height = self.font_size
+
+            canvas.before:
+                Color:
+                    rgba:
+                        ( \\
+                        ( \\
+                        app.theme_cls.disabled_hint_text_color \\
+                        if not root.selected_color_background else \\
+                        root.selected_color_background \\
+                        ) \\
+                        if root.active else \\
+                        (0, 0, 0, 0) \\
+                        ) \\
+                        if app.theme_cls.material_style == "M3" else \\
+                        (0, 0, 0, 0)
+                RoundedRectangle:
+                    radius: [16,]
+                    size: root._selected_region_width, dp(32)
+                    pos:
+                        self.center_x - root._selected_region_width / 2, \\
+                        self.center_y - (dp(16))
+
+        MDLabel:
+            id: _label
+            text: root.tab.text
+            size_hint_x: None
+            text_size: None, None
+            adaptive_height: True
+            theme_text_color: "Custom"
+            text_color: root._text_color_normal
+            opposite_colors: root.opposite_colors
+            font_size: min(root._label_font_size, sp(13))
+            pos_hint: {"center_x": .5}
+            y: "4dp" if app.theme_cls.material_style == "M2" else "6dp"
+            font_style:
+                "Button" if app.theme_cls.material_style == "M2" else "Body2"
+""")
+
 SPLASH_MIN_SEC = 1.8        # 品牌启动页最短停留（需求确认：1~2 秒）
 SPLASH_MAX_SEC = 30.0       # 兜底：最迟移除
 
@@ -184,9 +263,10 @@ class NiumenApp(MDApp):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.title = "牛票 Nstock"
+        self.title = "牛票"
         self.watchlist = Watchlist()
         self.pages = {}
+        self.last_code = config.DEFAULT_CODE   # 牛门线/枢轴点共享的默认代码（需求 4）
         self._loading = False
         self._first_load_done = False
         self._splash_removed = False
@@ -208,9 +288,9 @@ class NiumenApp(MDApp):
         root = MDBoxLayout(orientation="vertical")
         self.screen.add_widget(root)
 
-        # 顶栏
+        # 顶栏（应用名显示"牛票"）
         self.topbar = MDTopAppBar(
-            title="牛票 Nstock",
+            title="牛票",
             md_bg_color=get_color_from_hex("#12294a"),
             elevation=0,  # KivyMD 阴影着色器在 Adreno 驱动上崩溃（真机 SIGSEGV）
             right_action_items=[
@@ -347,13 +427,18 @@ class NiumenApp(MDApp):
         return item
 
     def _on_switch_tabs(self, instance, tab, *args):
-        """切换到底部导航某页：大盘信息页自动刷新（TTL 冷却）。"""
+        """切换到底部导航某页：大盘信息页自动刷新（TTL 冷却）；
+        枢轴点页默认股票与牛门线保持同一个（需求 4）。"""
         try:
             name = getattr(tab, "name", "")
             if name == "market":
                 page = self.pages.get("market")
                 if page is not None:
                     page.refresh_if_stale()
+            elif name == "pivot":
+                page = self.pages.get("pivot")
+                if page is not None:
+                    page.sync_default_code(self.last_code)
         except Exception:  # noqa: BLE001
             pass
 

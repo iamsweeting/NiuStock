@@ -129,9 +129,9 @@ class PivotPage:
         mode_row.add_widget(self.mode_daily)
         mode_row.add_widget(self.mode_weekly)
 
-        self.date_label = MDLabel(
-            text="指定日期：%s" % self.target_date.strftime("%Y-%m-%d"),
-            adaptive_height=True, size_hint_x=1, valign="middle",
+        # 日期仅保留日历图标（需求 6：不写"指定日期"文字，图标即示意）
+        self.date_label = MDLabel(  # 保留引用但文字置空
+            text="", adaptive_height=True, size_hint_x=1, valign="middle",
         )
         date_btn = MDIconButton(
             icon="calendar", theme_icon_color="Custom",
@@ -229,7 +229,15 @@ class PivotPage:
 
     def _on_date(self, value):
         self.target_date = value
-        self.date_label.text = "指定日期：%s" % value.strftime("%Y-%m-%d")
+        # 需求 6：不显示"指定日期"文字，日期体现在计算日里
+
+    def sync_default_code(self, code):
+        """需求 4：与牛门线共享默认股票——输入框为空时填入该代码。"""
+        try:
+            if code and not (self.code_field.text or "").strip():
+                self.code_field.text = code
+        except Exception:  # noqa: BLE001
+            pass
 
     def on_calc(self):
         if self._busy:
@@ -238,6 +246,14 @@ class PivotPage:
         if not raw:
             self.app._toast("请输入股票代码")
             return
+        try:
+            # 需求 7：统一规范化（159516→sz159516，带前缀也识别），显示一致
+            code = api.normalize_code(raw)
+        except ValueError as e:
+            self.app._toast(str(e))
+            return
+        self.code_field.text = code
+        self.app.last_code = code   # 回写给牛门线共享（需求 4）
         self._busy = True
         self.calc_btn.disabled = True
         self.results_box.clear_widgets()
@@ -249,8 +265,8 @@ class PivotPage:
         weekly = self.mode == MODE_WEEKLY
 
         def work():
-            res = api.fetch_pivot_quote(raw, self.target_date, weekly=weekly)
-            Clock.schedule_once(lambda dt: self._on_result(raw, res), 0)
+            res = api.fetch_pivot_quote(code, self.target_date, weekly=weekly)
+            Clock.schedule_once(lambda dt: self._on_result(code, res), 0)
 
         threading.Thread(target=work, daemon=True).start()
 

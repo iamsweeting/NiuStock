@@ -82,9 +82,9 @@ class BatchPage:
         row2 = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(44), spacing=dp(8),
         )
+        # 需求 6：日期仅保留日历图标，不写文字
         self.date_label = MDLabel(
-            text="指定日期：%s" % self.target_date.strftime("%Y-%m-%d"),
-            adaptive_height=True, size_hint_x=1, valign="middle",
+            text="", adaptive_height=True, size_hint_x=1, valign="middle",
         )
         date_btn = MDIconButton(
             icon="calendar", theme_icon_color="Custom",
@@ -135,7 +135,8 @@ class BatchPage:
 
     def _cycle_algo(self):
         self.algo_idx = (self.algo_idx + 1) % len(config.PIVOT_ALGORITHMS)
-        self.algo_btn.text = "算法：%s ▾" % config.PIVOT_ALGORITHMS[self.algo_idx]
+        # 需求 8：不用"▾"等可能缺字形的字符，按钮本身即示意可点
+        self.algo_btn.text = "算法：%s" % config.PIVOT_ALGORITHMS[self.algo_idx]
 
     def _open_date_picker(self):
         dlg = MDDatePicker(
@@ -151,7 +152,6 @@ class BatchPage:
 
     def _on_date(self, value):
         self.target_date = value
-        self.date_label.text = "指定日期：%s" % value.strftime("%Y-%m-%d")
 
     def on_calc(self):
         if self._busy:
@@ -161,6 +161,14 @@ class BatchPage:
         if not codes:
             self.app._toast("未解析到有效股票代码")
             return
+        # 需求 7：统一规范化（159516→sz159516；带 sh/sz 前缀也识别），显示一致
+        norm = []
+        for c in codes:
+            try:
+                norm.append(api.normalize_code(c))
+            except ValueError:
+                norm.append(c)
+        codes = norm
         self._busy = True
         self.calc_btn.disabled = True
         self.results_box.clear_widgets()

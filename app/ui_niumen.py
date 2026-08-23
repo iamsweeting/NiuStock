@@ -102,14 +102,28 @@ class NiumenPage:
         self._refresh_chips()
 
     def _refresh_chips(self):
-        """按查询名单前 3 个重建快捷按钮；长按从名单移除。"""
+        """按查询名单前 3 个重建快捷按钮；长按从名单移除。
+
+        名称 ≤4 字用大号字；更长则缩字号并允许两行显示（需求 3）。
+        """
         self.chips_row.clear_widgets()
         for item in self.app.watchlist.top(3):
+            name = item["name"]
+            n = len(name)
+            if n > 4:
+                height, font = dp(46), 11
+            else:
+                height, font = dp(36), 14
             b = MDRaisedButton(
-                text=item["name"], size_hint_x=1, size_hint_y=None, height=dp(36),
+                text=name, size_hint_x=1, size_hint_y=None, height=height,
                 md_bg_color=CHIP_BG, text_color=(1, 1, 1, 1),
+                font_size=dp(font), halign="center", valign="middle",
             )
             b.elevation = 0
+            if n > 4:
+                # 长名称允许换行（两行）
+                b.bind(width=lambda w, *a: setattr(
+                    w, "text_size", (w.width - dp(8), None)))
             b._code = item["code"]
             b.bind(on_release=lambda x: self._chip_release(x))
             self._bind_long_press(b, lambda w: self._chip_remove(w))
@@ -339,6 +353,7 @@ class NiumenPage:
             self.app._toast(str(e))
             return
         self._last_code = code
+        self.app.last_code = code   # 供枢轴点页共享默认股票（需求 4）
         self.input_field.text = code
         self.app.show_loading(True)
         # 请求序号：快速连点时丢弃过期线程的返回
@@ -490,12 +505,17 @@ class NiumenPage:
                 ("cbx20", "CBX20 短期成本", config.COLOR_CBX20),
                 ("cbx60", "CBX60 中期成本", config.COLOR_CBX60),
             ]
-        rows_html = []
+        # 按数值从大到小排列（需求 1：上面数值大于下面数值）
+        rows_data = []
         for key, label, col in keys:
             v = b.get(key)
             if v is None:
                 continue
             status, scol = res["flags"].get(key, ("—", (0.7, 0.7, 0.7, 1.0)))
+            rows_data.append((v, key, label, col, status, scol))
+        rows_data.sort(key=lambda x: x[0], reverse=True)
+        rows_html = []
+        for v, key, label, col, status, scol in rows_data:
             rows_html.append(
                 "[color=%s]%s[/color]  %s   [color=%s]● %s[/color]"
                 % (_hex(col), label, _fmt(v), _hex(scol), status)
@@ -509,10 +529,11 @@ class NiumenPage:
         self.verdict_label.text_color = res["verdict_color"]
         self.stage_label.text = "阶段：%s" % res["stage"]
         self.summary_label.text = res["summary"]
+        # 关键位不再重复数值（数值已在图下方"分析"卡的明细中列出；需求 2）
         lines = []
         for kind, label, value, note in res["levels"]:
             col = LEVEL_KIND_COLORS.get(kind, "#ffffff")
             lines.append(
-                "[color=%s]●[/color] %s %s（%s）%s" % (col, kind, label, _fmt(value), note)
+                "[color=%s]●[/color] %s %s %s" % (col, kind, label, note)
             )
         self.levels_label.text = "\n".join(lines)
