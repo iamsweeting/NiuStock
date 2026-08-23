@@ -20,7 +20,6 @@ from . import config
 from .geometry import map_y
 
 _AXIS_COLOR = (0.78, 0.80, 0.86, 1.0)   # 纵坐标颜色（亮一些，保证可见）
-_LINE_W = 2          # 指标线矩形段厚度（px）
 
 
 class NMLChart(Widget):
@@ -41,6 +40,8 @@ class NMLChart(Widget):
                 size_hint=(None, None), size=(dp(56), dp(16)),
                 halign="right", valign="middle",
             )
+            # text_size 必须设置，halign/valign 才生效（否则数字靠左上角）
+            lb.bind(size=lambda o, *a: setattr(o, "text_size", (o.width, o.height)))
             self.add_widget(lb)
             self._axis_labels.append(lb)
 
@@ -98,17 +99,17 @@ class NMLChart(Widget):
                 y = Y(p)
                 Color(*_AXIS_COLOR)
                 Rectangle(pos=(pad_l - dp(7), y - 1), size=(dp(7), 2))
-            # 蜡烛
+            # 蜡烛（Kivy y 向上：高价在上、低价在下）
             for i, b in enumerate(self._bars):
                 x = pad_l + step * i + step / 2.0
                 up = b["close"] >= b["open"]
                 col = config.COLOR_UP if up else config.COLOR_DOWN
                 Color(*col)
                 Line(points=[x, Y(b["high"]), x, Y(b["low"])], width=1)
-                y1 = Y(max(b["open"], b["close"]))
-                y2 = Y(min(b["open"], b["close"]))
-                Rectangle(pos=(x - cw / 2.0, y1), size=(cw, max(y2 - y1, 1)))
-            # 指标线（矩形段）
+                y_top = Y(max(b["open"], b["close"]))
+                y_bot = Y(min(b["open"], b["close"]))
+                Rectangle(pos=(x - cw / 2.0, y_bot), size=(cw, max(y_top - y_bot, 1)))
+            # 指标线：沿线细分小矩形（Line 在 Adreno 不渲染；整段大矩形会成块状）
             for _, col, lv in self._lines:
                 pts = []
                 for i, v in enumerate(lv):
@@ -121,17 +122,24 @@ class NMLChart(Widget):
                 for i in range(len(pts) - 1):
                     x1, y1 = pts[i]
                     x2, y2 = pts[i + 1]
-                    Rectangle(pos=(min(x1, x2), min(y1, y2) - 1),
-                              size=(abs(x2 - x1), abs(y2 - y1) + _LINE_W))
+                    # 沿线细分 2px 小矩形，构成连续细线（整段大矩形会成块状）
+                    dx, dy = x2 - x1, y2 - y1
+                    dist = max(abs(dx), abs(dy))
+                    steps = max(int(dist / 2.0), 1)
+                    for s in range(steps + 1):
+                        t = s / steps
+                        xx = x1 + dx * t
+                        yy = y1 + dy * t
+                        Rectangle(pos=(xx - 1, yy - 1), size=(2, 2))
             PopMatrix()
 
-        # 纵坐标标签（4 档）：按控件实际高度分数定位（widget 定位可靠）
+        # 纵坐标标签（4 档）：子控件 pos 相对父级（左下原点、y 向上），
+        # 不可再加 self.x/self.y（否则双重偏移导致数字跑到屏外/错位）
         for idx, frac in enumerate((0.0, 1 / 3, 2 / 3, 1.0)):
             p = lo + (hi - lo) * frac
             lb = self._axis_labels[idx]
             lb.text = "%.2f" % p
-            lb.pos = (self.x + dp(2),
-                      self.y + pad_t + (1.0 - frac) * plot_h - dp(7))
+            lb.pos = (dp(2), pad_t + frac * plot_h - dp(7))
 
 
 class VolumePanel(Widget):
@@ -156,7 +164,8 @@ class VolumePanel(Widget):
 
     def _redraw(self, *args):
         self.canvas.clear()
-        self._label.pos = (self.x + dp(2), self.y + self.height - dp(12))
+        # 子控件 pos 相对父级，不能再叠加 self.x/self.y（双重偏移）
+        self._label.pos = (dp(2), self.height - dp(12))
         if not self._bars or self.width < 10 or self.height < 10:
             return
         w, h = self.width, self.height

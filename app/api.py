@@ -380,8 +380,10 @@ def aggregate_pivot(rows, target, weekly=False, skip_today=False):
         return None
 
     if weekly:
-        start = eff - timedelta(days=6)
-        week = [r for d, r in upto if d >= start]
+        # 按自然周（周一~周日）聚合：目标日所在周为计算周，下一自然周为验证周。
+        # 需求修正：原"滚动7天窗"会把上周五并入本周、且下一周只有单日，周期不对。
+        monday = eff - timedelta(days=eff.weekday())
+        week = [r for d, r in dated if monday <= d < monday + timedelta(days=7)]
         if not week:
             return None
         calc_high = max(r["high"] for r in week)
@@ -389,7 +391,9 @@ def aggregate_pivot(rows, target, weekly=False, skip_today=False):
         calc_open = week[0]["open"]
         calc_close = week[-1]["close"]
         calc_date = "%s~%s" % (week[0]["date"][5:], week[-1]["date"][5:])
-        nxt = [(d, r) for d, r in dated if eff < d <= eff + timedelta(days=7)]
+        nxt_start = monday + timedelta(days=7)
+        nxt = [(d, r) for d, r in dated
+               if nxt_start <= d < nxt_start + timedelta(days=7)]
         if nxt:
             verify_high = max(r["high"] for _, r in nxt)
             verify_low = min(r["low"] for _, r in nxt)

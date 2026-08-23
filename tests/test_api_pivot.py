@@ -77,14 +77,38 @@ def test_aggregate_weekly():
     # 构造跨周末的两周数据：1/5(一)~1/9(五)，1/12(一)~1/16(五)
     days = _weekdays(date(2026, 1, 5), 10)
     rows = _rows(days)
-    # 周内高/低/收盘/开盘
-    target = days[3]  # 周四，本周窗口 1/5~1/8
+    # 目标=周四 1/8：计算周=其所在自然周 1/5~1/9
+    target = days[3]
     res = api.aggregate_pivot(rows, target, weekly=True)
-    assert res["calc_date"].startswith(days[0].strftime("%m-%d"))
+    assert res["calc_date"].startswith(days[0].strftime("%m-%d"))  # 周一 1/5
+    assert res["calc_date"].endswith(days[4].strftime("%m-%d"))    # 周五 1/9
     assert res["high"] == 11.0 and res["low"] == 9.0
     assert res["verify_mode"] == "next_week"
-    # 验证窗口 = 计算日次日 ~ 后7天（滚动周）：首个验证日为 1/9(五)
-    assert res["verify_date"].startswith(days[4].strftime("%m-%d"))
+    # 验证周 = 下一自然周：首个验证日为下周一 1/12
+    assert res["verify_date"].startswith(days[5].strftime("%m-%d"))
+    assert res["verify_date"].endswith(days[9].strftime("%m-%d"))  # 下周五 1/16
+
+
+def test_aggregate_weekly_midweek_target_uses_calendar_week():
+    # 目标=周三：计算周仍是所在自然周（周一~周五），验证周为下一自然周
+    days = _weekdays(date(2026, 1, 5), 10)
+    rows = _rows(days)
+    target = days[2]  # 1/7 周三
+    res = api.aggregate_pivot(rows, target, weekly=True)
+    assert res["calc_date"].startswith(days[0].strftime("%m-%d"))  # 1/5
+    assert res["calc_date"].endswith(days[4].strftime("%m-%d"))    # 1/9
+    assert res["verify_mode"] == "next_week"
+    assert res["verify_date"].startswith(days[5].strftime("%m-%d"))  # 1/12
+
+
+def test_aggregate_weekly_next_week_missing_falls_to_latest():
+    # 目标在最后一周内：下一自然周无数据 → 回退最新交易日
+    days = _weekdays(date(2026, 1, 5), 5)   # 只有 1/5~1/9 一周
+    rows = _rows(days)
+    target = days[3]  # 1/8 周四
+    res = api.aggregate_pivot(rows, target, weekly=True)
+    assert res["verify_mode"] == "latest"
+    assert res["verify_date"] == days[4].strftime("%Y-%m-%d")  # 1/9
 
 
 # --------------------------------------------------------------------------

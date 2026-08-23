@@ -274,7 +274,12 @@ class PivotPage:
 
     def _on_date(self, value):
         self.target_date = value
-        # 需求 6：不显示"指定日期"文字，日期体现在计算日里
+        # 需求 6：不显示"指定日期"文字，日期体现在计算日里；
+        # 同步刷新日期数字显示（否则选完日期数字不更新）
+        try:
+            self.date_label.text = value.strftime("%Y-%m-%d")
+        except Exception:  # noqa: BLE001
+            pass
 
     def sync_default_code(self, code):
         """需求 5：切到枢轴点时，默认输入 = 牛门线最新查询的代码。
