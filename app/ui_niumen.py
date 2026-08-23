@@ -30,7 +30,7 @@ except ImportError:  # KivyMD 1.1.x 的旧路径
     from kivymd.uix.picker import MDDatePicker
 
 from . import api, config, indicator, interpreter
-from .chart import DateAxis, NMLChart
+from .chart import DateAxis, NMLChart, VolumePanel
 
 CARD_RADIUS = [dp(14), dp(14), dp(14), dp(14)]
 CARD_PADDING = [dp(14), dp(12), dp(14), dp(12)]
@@ -206,7 +206,7 @@ class NiumenPage:
         box.add_widget(self.info_card)
 
     def _build_chart_card(self, box):
-        # 图表卡片：仅 K 线图 + 日期轴。不设图例行——
+        # 图表卡片：主图 + 成交额副图（位于主图下方）+ 日期轴。
         # 各线名称/颜色/数值/状态统一在下方"分析"卡列出，避免重复介绍。
         self.chart_card = MDCard(
             orientation="vertical",
@@ -215,8 +215,10 @@ class NiumenPage:
         )
         self.chart_card.bind(minimum_height=self.chart_card.setter("height"))
         self.chart = NMLChart()
+        self.volume = VolumePanel()
         self.date_axis = DateAxis()
         self.chart_card.add_widget(self.chart)
+        self.chart_card.add_widget(self.volume)
         self.chart_card.add_widget(self.date_axis)
         box.add_widget(self.chart_card)
 
@@ -405,6 +407,7 @@ class NiumenPage:
             lines.append((label, col, [self.bars[i][key] for i in range(start, end + 1)]))
         window = self.bars[start:end + 1]
         self.chart.set_data(window, lines, end - start)
+        self.volume.set_data(window)
         self.date_axis.set_dates([b["date"] for b in window])
 
     def _update_values(self):
