@@ -39,6 +39,7 @@ class MarketPage:
         self._busy = False
         self._last_refresh = 0.0
         self._hist_rows = {k: [] for k in _HIST_FIELDS}
+        self._quotes = []
 
     # ------------------------------------------------------------------
     # 构建
@@ -170,6 +171,7 @@ class MarketPage:
 
     def _build_skeleton(self):
         """先渲染固定表格骨架 + 「查询中…」占位，保证首屏立刻可见。"""
+        self._quotes = []
         self.ts_label.text = "更新于：刷新中…"
         self.turnover_label.text = "两市成交额：查询中…"
         self.median_label.text = "沪深300中位数：查询中…"
@@ -198,9 +200,11 @@ class MarketPage:
         try:
             if key == "live_sina":
                 self._render_turnover(data)
-                self._render_quotes(data.get("quotes", []))
+                self._quotes.extend(data.get("quotes", []))
+                self._render_quotes()
             elif key == "live_yahoo":
-                self._render_quotes(data.get("quotes", []))
+                self._quotes.extend(data.get("quotes", []))
+                self._render_quotes()
             elif key == "live_median":
                 self._render_median(data)
             elif key == "hist_kr":
@@ -243,8 +247,10 @@ class MarketPage:
             parts.append("本日预测额：—")
         self.turnover_label.text = "  ·  ".join(parts)
 
-    def _render_quotes(self, quotes):
-        # 指数/品种表格：与骨架表头对齐，逐行填充
+    def _render_quotes(self, quotes=None):
+        # 指数/品种表格：与骨架表头对齐，逐行填充（两小节合并渲染）
+        if quotes is None:
+            quotes = self._quotes
         if not quotes:
             return
         self.quotes_box.clear_widgets()
