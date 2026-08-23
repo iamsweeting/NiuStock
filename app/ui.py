@@ -148,6 +148,7 @@ _patch_bottomnav_kivy22()
 # KivyMD 1.1.1 底部导航 Header 的标签在选中放大时会向上顶到图标；
 # 覆盖其 kv 规则：标签固定在底部、字号封顶，保证不与图标重叠。
 Builder.load_string("""
+#:import md_icons kivymd.icon_definitions.md_icons
 <MDBottomNavigationHeader>
     md_bg_color: root.panel_color
     on_press: self.tab.dispatch("on_tab_press")
