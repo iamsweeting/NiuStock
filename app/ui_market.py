@@ -110,10 +110,13 @@ class MarketPage:
 
     @staticmethod
     def _make_card():
-        return MDCard(
+        card = MDCard(
             orientation="vertical", padding=[dp(12), dp(8), dp(12), dp(8)],
             radius=_CARD_RADIUS, elevation=0, size_hint_y=None,
         )
+        # 关键：卡片高度随内容自适应，避免与相邻表格/卡片重叠
+        card.bind(minimum_height=card.setter("height"))
+        return card
 
     @staticmethod
     def _row(cells, height=_ROW_H):
