@@ -45,6 +45,7 @@ LEGULEGU_HS300 = "https://legulegu.com/stockdata/hs300-ttm-lyr"
 # 本日实时：新浪批量代码（同一请求）
 SINA_LIVE_CODES = [
     ("sh000001", "上证指数", "cn"),
+    ("sh000510", "中证A500", "cn"),
     ("sh000852", "中证1000", "cn"),
     ("sh000300", "沪深300", "cn"),
     ("sz399001", "深证成指", "cn"),      # 仅用于两市成交额合计

@@ -61,10 +61,13 @@ def test_fibonacci_pivot():
 def test_camarilla_pivot():
     p = pivot.calculate_single_pivot(110, 90, 100, algorithm="卡玛利亚")
     assert p["pp"] == 100.0
-    assert p["r1"] == round(100 + 20 / 12, 3)
-    assert p["s1"] == round(100 - 20 / 12, 3)
-    assert p["r4"] == pytest.approx(110.0)
-    assert p["s4"] == pytest.approx(90.0)
+    # 标准卡玛利亚：R/S = C ± (H-L) × 1.1 / N
+    assert p["r1"] == round(100 + 20 * 1.1 / 12, 3)
+    assert p["s1"] == round(100 - 20 * 1.1 / 12, 3)
+    assert p["r2"] == round(100 + 20 * 1.1 / 6, 3)
+    assert p["s2"] == round(100 - 20 * 1.1 / 6, 3)
+    assert p["r4"] == pytest.approx(111.0)   # 100 + 20*1.1/2
+    assert p["s4"] == pytest.approx(89.0)    # 100 - 20*1.1/2
 
 
 def test_woodie_pivot():

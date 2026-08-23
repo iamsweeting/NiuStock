@@ -43,7 +43,7 @@ TAB_DEFS = [
     ("niumen", "牛门线", "chart-line"),
     ("pivot", "枢轴点", "calculator"),
     ("batch", "批量枢轴", "format-list-bulleted"),
-    ("market", "大盘", "finance"),
+    ("market", "行情", "finance"),
 ]
 
 _IDLE_COLOR = (0.62, 0.66, 0.72, 1.0)

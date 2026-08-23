@@ -123,14 +123,15 @@ def calculate_pivot_points(high, low, close, open_price=None):
     results.append("R1: {:.3f}, R2: {:.3f}, R3: {:.3f}".format(r1, r2, r3))
     results.append("S1: {:.3f}, S2: {:.3f}, S3: {:.3f}".format(s1, s2, s3))
     pp = (high + low + close) / 3
-    r1 = close + (high - low) / 12
-    r2 = close + (high - low) / 6
-    r3 = close + (high - low) / 4
-    r4 = close + (high - low) / 2
-    s1 = close - (high - low) / 12
-    s2 = close - (high - low) / 6
-    s3 = close - (high - low) / 4
-    s4 = close - (high - low) / 2
+    rng = high - low
+    r1 = close + rng * 1.1 / 12
+    r2 = close + rng * 1.1 / 6
+    r3 = close + rng * 1.1 / 4
+    r4 = close + rng * 1.1 / 2
+    s1 = close - rng * 1.1 / 12
+    s2 = close - rng * 1.1 / 6
+    s3 = close - rng * 1.1 / 4
+    s4 = close - rng * 1.1 / 2
     results.append("卡玛利亚枢轴点-PP: {:.3f}".format(pp))
     results.append("R1: {:.3f}, R2: {:.3f}, R3: {:.3f}, R4: {:.3f}".format(r1, r2, r3, r4))
     results.append("S1: {:.3f}, S2: {:.3f}, S3: {:.3f}, S4: {:.3f}".format(s1, s2, s3, s4))
@@ -222,15 +223,17 @@ def calculate_single_pivot(high, low, close, open_price=None, algorithm="经典"
                 "r2": round(r2, 3), "s2": round(s2, 3), "r3": round(r3, 3),
                 "s3": round(s3, 3), "r4": "-", "s4": "-"}
     elif algorithm == "卡玛利亚":
+        # 标准卡玛利亚公式带 1.1 系数：R = C ± (H-L) * 1.1/N
         pp = (high + low + close) / 3
-        r1 = close + (high - low) / 12
-        s1 = close - (high - low) / 12
-        r2 = close + (high - low) / 6
-        s2 = close - (high - low) / 6
-        r3 = close + (high - low) / 4
-        s3 = close - (high - low) / 4
-        r4 = close + (high - low) / 2
-        s4 = close - (high - low) / 2
+        rng = high - low
+        r1 = close + rng * 1.1 / 12
+        s1 = close - rng * 1.1 / 12
+        r2 = close + rng * 1.1 / 6
+        s2 = close - rng * 1.1 / 6
+        r3 = close + rng * 1.1 / 4
+        s3 = close - rng * 1.1 / 4
+        r4 = close + rng * 1.1 / 2
+        s4 = close - rng * 1.1 / 2
         return {"pp": round(pp, 3), "r1": round(r1, 3), "s1": round(s1, 3),
                 "r2": round(r2, 3), "s2": round(s2, 3), "r3": round(r3, 3),
                 "s3": round(s3, 3), "r4": round(r4, 3), "s4": round(s4, 3)}

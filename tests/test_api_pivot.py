@@ -84,13 +84,13 @@ def test_aggregate_weekly():
     assert res["calc_date"].endswith(days[4].strftime("%m-%d"))    # 周五 1/9
     assert res["high"] == 11.0 and res["low"] == 9.0
     assert res["verify_mode"] == "next_week"
-    # 验证周 = 下一自然周：首个验证日为下周一 1/12
-    assert res["verify_date"].startswith(days[5].strftime("%m-%d"))
-    assert res["verify_date"].endswith(days[9].strftime("%m-%d"))  # 下周五 1/16
+    # 验证周 = 目标日下一交易日起一周（滚动窗口）：1/9 起，含 1/12~1/15
+    assert res["verify_date"].startswith(days[4].strftime("%m-%d"))  # 1/9
+    assert res["verify_date"].endswith(days[8].strftime("%m-%d"))    # 1/15（1/8+7天）
 
 
 def test_aggregate_weekly_midweek_target_uses_calendar_week():
-    # 目标=周三：计算周仍是所在自然周（周一~周五），验证周为下一自然周
+    # 目标=周三：计算周仍是所在自然周（周一~周五），验证周=下一交易日起滚动一周
     days = _weekdays(date(2026, 1, 5), 10)
     rows = _rows(days)
     target = days[2]  # 1/7 周三
@@ -98,17 +98,18 @@ def test_aggregate_weekly_midweek_target_uses_calendar_week():
     assert res["calc_date"].startswith(days[0].strftime("%m-%d"))  # 1/5
     assert res["calc_date"].endswith(days[4].strftime("%m-%d"))    # 1/9
     assert res["verify_mode"] == "next_week"
-    assert res["verify_date"].startswith(days[5].strftime("%m-%d"))  # 1/12
+    assert res["verify_date"].startswith(days[3].strftime("%m-%d"))  # 1/8（目标日次日）
 
 
-def test_aggregate_weekly_next_week_missing_falls_to_latest():
-    # 目标在最后一周内：下一自然周无数据 → 回退最新交易日
+def test_aggregate_weekly_next_week_partial_counts():
+    # 目标在最后一周内：验证窗口不足一周 → 有几天算几天（1/9~1/9）
     days = _weekdays(date(2026, 1, 5), 5)   # 只有 1/5~1/9 一周
     rows = _rows(days)
     target = days[3]  # 1/8 周四
     res = api.aggregate_pivot(rows, target, weekly=True)
-    assert res["verify_mode"] == "latest"
-    assert res["verify_date"] == days[4].strftime("%Y-%m-%d")  # 1/9
+    assert res["verify_mode"] == "next_week"
+    assert res["verify_date"].startswith(days[4].strftime("%m-%d"))  # 1/9
+    assert res["verify_date"].endswith(days[4].strftime("%m-%d"))    # 1/9（仅一天）
 
 
 # --------------------------------------------------------------------------
