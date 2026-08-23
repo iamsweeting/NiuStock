@@ -35,3 +35,6 @@ app/assets/fonts/*.ttc
 # ç³»ç»Ÿ
 .DS_Store
 Thumbs.db
+
+# ±¾µØ½ØÍ¼
+.*.png
