@@ -90,6 +90,7 @@ class PivotPage:
         self.mode = MODE_DAILY
         self.target_date = date.today()
         self._busy = False
+        self._synced_code = None   # 已同步过的默认代码（需求 5）
 
     # ------------------------------------------------------------------
     # 构建
@@ -129,9 +130,10 @@ class PivotPage:
         mode_row.add_widget(self.mode_daily)
         mode_row.add_widget(self.mode_weekly)
 
-        # 日期仅保留日历图标（需求 6：不写"指定日期"文字，图标即示意）
-        self.date_label = MDLabel(  # 保留引用但文字置空
-            text="", adaptive_height=True, size_hint_x=1, valign="middle",
+        # 需求：日期显示数字（去掉"指定日期"汉语），前面带日历图标
+        self.date_label = MDLabel(
+            text=self.target_date.strftime("%Y-%m-%d"),
+            adaptive_height=True, size_hint_x=1, valign="middle",
         )
         date_btn = MDIconButton(
             icon="calendar", theme_icon_color="Custom",
@@ -232,10 +234,14 @@ class PivotPage:
         # 需求 6：不显示"指定日期"文字，日期体现在计算日里
 
     def sync_default_code(self, code):
-        """需求 4：与牛门线共享默认股票——输入框为空时填入该代码。"""
+        """需求 5：切到枢轴点时，默认输入 = 牛门线最新查询的代码。
+
+        仅当代码发生变化时更新，避免覆盖用户手动输入的内容。
+        """
         try:
-            if code and not (self.code_field.text or "").strip():
+            if code and code != self._synced_code:
                 self.code_field.text = code
+                self._synced_code = code
         except Exception:  # noqa: BLE001
             pass
 
@@ -254,6 +260,7 @@ class PivotPage:
             return
         self.code_field.text = code
         self.app.last_code = code   # 回写给牛门线共享（需求 4）
+        self._synced_code = code
         self._busy = True
         self.calc_btn.disabled = True
         self.results_box.clear_widgets()

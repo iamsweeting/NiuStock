@@ -16,6 +16,9 @@ def test_strong_uptrend():
     assert "强势上攻" in res["stage"]
     assert res["flags"]["nml"][0] == "已突破"
     assert res["flags"]["qrl"][0] == "已突破"
+    # 结论不再引用数值，改为线序描述（需求：数值没有相对位置重要）
+    assert "多头排列" in res["summary"]
+    assert "11.5" not in res["summary"]
 
 
 def test_just_broke_nml():

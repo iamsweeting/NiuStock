@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """数据源模块（牛票 Nstock）。
 
 统一数据源链（追加确认）：三大功能共用同一条自动链，界面不提供切换：
@@ -310,6 +310,14 @@ def fetch_klines(code):
 _SOURCE_NAMES = {"腾讯": config.SOURCE_TENCENT, "新浪": config.SOURCE_SINA}
 
 
+def _f(v):
+    """宽松浮点转换（用于实时报价兜底解析）。"""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _to_date(d):
     """统一为 datetime.date（兼容 str / date / datetime）。"""
     if isinstance(d, datetime):
@@ -420,8 +428,60 @@ def aggregate_pivot(rows, target, weekly=False, skip_today=False):
     }
 
 
+def _fetch_realtime_pivot(code, target_date):
+    """实时报价兜底（仅当日，same_day）：部分品种腾讯K线无历史覆盖。
+
+      - us*（纳斯达克等美股指数）：腾讯 qt.gtimg.cn，字段 3/4/5=现/昨/开，33/34/35=涨跌%/高/低
+      - nf_*（沪金主连等期货）/ hf_*（纽约金等贵金属）：新浪 hq，逗号格式
+    返回 {high, low, close, open, name, source} 或 None（不支持）。
+    """
+    clean, prefix, is_eng = parse_stock_code(code)
+    query = code
+    try:
+        sess = _session()
+        if prefix == "us":
+            r = _get(sess, TENCENT_QUOTE + query)
+            r.encoding = "gbk"
+            m = re.search(r'="([^"]*)"', r.text)
+            if not m:
+                return None
+            f = m.group(1).split("~")
+            if len(f) < 36:
+                return None
+            return {
+                "name": f[1], "high": _f(f[34]), "low": _f(f[35]),
+                "close": _f(f[3]), "open": _f(f[5]),
+                "source": config.SOURCE_TENCENT,
+            }
+        if prefix in ("nf", "hf"):
+            r = _get(sess, "https://hq.sinajs.cn/list=" + code,
+                     headers={"Referer": "https://finance.sina.com.cn/"})
+            r.encoding = "gbk"
+            m = re.search(r'="([^"]*)"', r.text)
+            if not m or not m.group(1):
+                return None
+            f = m.group(1).split(",")
+            if prefix == "nf":
+                # 期货：2=开 3=高 4=低 8=最新
+                res = {"name": f[0], "high": _f(f[3]), "low": _f(f[4]),
+                       "close": _f(f[8]), "open": _f(f[2]),
+                       "source": config.SOURCE_SINA}
+            else:
+                # 贵金属：0=现价 1=昨收 2=今开 4=高 5=低
+                res = {"name": f[13] if len(f) > 13 else code,
+                       "high": _f(f[4]), "low": _f(f[5]),
+                       "close": _f(f[0]), "open": _f(f[2]) if len(f) > 2 else _f(f[0]),
+                       "source": config.SOURCE_SINA}
+            if res["close"] > 0:
+                return res
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def fetch_pivot_quote(code, target_date, weekly=False):
-    """枢轴点数据：统一链 腾讯财经 → 新浪财经 自动获取并聚合。
+    """枢轴点数据：统一链 腾讯财经 → 新浪财经 自动获取并聚合；
+    部分品种（美股指数/贵金属/期货）K线无覆盖时用实时报价兜底（当日）。
 
     返回 {"ok": bool, "msg", "name", "source", 及 OHLC/验证字段, "note"}。
     盘中（所选日=今天且交易时段）自动回退最近收盘日，note 说明。
@@ -431,10 +491,30 @@ def fetch_pivot_quote(code, target_date, weekly=False):
     try:
         res = fetch_klines(code)
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "msg": "获取 %s 行情失败：%s" % (code, e)}
-    rows = res["rows"]
+        res = None
+        kline_err = e
+    rows = res["rows"] if res else None
     if not rows:
-        return {"ok": False, "msg": "获取 %s 行情失败" % code}
+        # K线不可用 → 实时报价兜底（仅当日）
+        if weekly:
+            return {"ok": False, "msg": "获取 %s 行情失败：%s" % (code, kline_err)}
+        rt = _fetch_realtime_pivot(code, target)
+        if rt:
+            date_show = target.strftime("%Y-%m-%d")
+            out = {"ok": True, "name": rt["name"], "source": rt["source"], "msg": ""}
+            out.update({
+                "high": rt["high"], "low": rt["low"], "close": rt["close"],
+                "open": rt["open"], "calc_date": date_show,
+                "verify_high": rt["high"], "verify_low": rt["low"],
+                "verify_close": rt["close"], "verify_date": date_show,
+                "verify_mode": "same_day", "adjusted": False,
+                "eff_date": date_show, "note": "实时报价（当日）",
+            })
+            h, l, c = out["high"], out["low"], out["close"]
+            if h > 0 and l > 0 and c > 0 and h >= l and l <= c <= h:
+                return out
+            return {"ok": False, "msg": "行情数值异常"}
+        return {"ok": False, "msg": "获取 %s 行情失败：%s" % (code, kline_err)}
     name = res["name"] or code
     source = _SOURCE_NAMES.get(res["source"], res["source"])
 

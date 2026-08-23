@@ -83,6 +83,24 @@ PIVOT_SOURCE_CHAIN = (SOURCE_TENCENT, SOURCE_SINA)
 
 PIVOT_ALGORITHMS = ("经典", "斐波那契", "卡玛利亚", "伍迪", "迪马克")
 
+# 批量枢轴点 ·「大盘」一键预设（A股常见指数 + 港股 + 金；按行填入批量输入框）
+# 注：日经/韩国股指在免费数据源无覆盖（手机网络 Yahoo 亦不可达），暂不列入
+MARKET_PRESET = [
+    ("sh000001", "上证指数"),
+    ("sh000852", "中证1000"),
+    ("sh000905", "中证500"),
+    ("sh000300", "沪深300"),
+    ("sh000688", "科创50"),
+    ("sz399006", "创业板指"),
+    ("hkHSI", "恒生指数"),
+    ("hkHSTECH", "恒生科技"),
+    ("sh513330", "恒生互联网ETF"),
+    ("usIXIC", "纳斯达克"),
+    ("hf_GC", "纽约金"),
+    ("nf_AU0", "沪金主连"),
+]
+MARKET_PRESET_CODES = [c for c, _n in MARKET_PRESET]
+
 # 当日盘中处理：所选日=今天且处于交易时段时，枢轴点自动回退最近收盘日
 TRADING_START = (9, 15)    # 北京时间
 TRADING_END = (15, 0)

@@ -75,7 +75,6 @@ class NiumenPage:
         self._build_chart_card(box)
         self._build_values_card(box)
         self._build_judgment_card(box)
-        self._build_watchlist_card(box)
 
     def _build_search(self, box):
         row = MDBoxLayout(
@@ -139,7 +138,6 @@ class NiumenPage:
         self.app.watchlist.remove(code)
         self.app._toast("已从名单移除：%s" % code)
         self._refresh_chips()
-        self._rebuild_watchlist_rows()
 
     @staticmethod
     def _bind_long_press(widget, cb):
@@ -262,82 +260,8 @@ class NiumenPage:
         self.judgment_card.add_widget(self.levels_label)
         box.add_widget(self.judgment_card)
 
-    def _build_watchlist_card(self, box):
-        """查询名单管理卡：完整名单 + 删除/清空。"""
-        self.watchlist_card = MDCard(
-            orientation="vertical",
-            padding=CARD_PADDING, spacing=dp(4),
-            radius=CARD_RADIUS, elevation=0, size_hint_y=None,
-        )
-        self.watchlist_card.bind(minimum_height=self.watchlist_card.setter("height"))
-        head = MDBoxLayout(
-            orientation="horizontal", size_hint_y=None, height=dp(32), spacing=dp(8),
-        )
-        head.add_widget(MDLabel(
-            text="自选名单（最近查询前 %d）" % config.WATCHLIST_LIMIT,
-            font_style="Subtitle1", adaptive_height=True, size_hint_x=1,
-        ))
-        clear_btn = MDRaisedButton(
-            text="清空", size_hint=(None, None), width=dp(64), height=dp(30),
-        )
-        clear_btn.elevation = 0
-        clear_btn.bind(on_release=lambda x: self._watchlist_clear())
-        head.add_widget(clear_btn)
-        self.watchlist_card.add_widget(head)
-        self.watchlist_body = MDBoxLayout(
-            orientation="vertical", spacing=dp(2), adaptive_height=True,
-        )
-        self.watchlist_card.add_widget(self.watchlist_body)
-        box.add_widget(self.watchlist_card)
-        self._rebuild_watchlist_rows()
-
-    def _rebuild_watchlist_rows(self):
-        self.watchlist_body.clear_widgets()
-        items = self.app.watchlist.items()
-        for it in items:
-            row = MDBoxLayout(
-                orientation="horizontal", size_hint_y=None, height=dp(34), spacing=dp(8),
-            )
-            lb = MDLabel(
-                text="%s  %s" % (it["name"], it["code"]),
-                adaptive_height=True, size_hint_x=1, valign="middle",
-                font_style="Body2",
-            )
-            go = MDIconButton(
-                icon="magnify", theme_icon_color="Custom",
-                icon_color=get_color_from_hex("#8ab4f8"), size_hint=(None, None),
-                size=(dp(32), dp(32)),
-            )
-            go._code = it["code"]
-            go.bind(on_release=lambda x: self.on_query(x._code))
-            rm = MDIconButton(
-                icon="delete", theme_icon_color="Custom",
-                icon_color=get_color_from_hex("#ef5350"), size_hint=(None, None),
-                size=(dp(32), dp(32)),
-            )
-            rm._code = it["code"]
-            rm.bind(on_release=lambda x: self._watchlist_remove(x._code))
-            row.add_widget(lb)
-            row.add_widget(go)
-            row.add_widget(rm)
-            self.watchlist_body.add_widget(row)
-        if not items:
-            self.watchlist_body.add_widget(MDLabel(
-                text="（暂无记录，查询过的代码会自动加入）",
-                font_style="Caption", theme_text_color="Hint", adaptive_height=True,
-            ))
-
-    def _watchlist_remove(self, code):
-        self.app.watchlist.remove(code)
-        self.app._toast("已移除：%s" % code)
-        self._refresh_chips()
-        self._rebuild_watchlist_rows()
-
-    def _watchlist_clear(self):
-        self.app.watchlist.clear()
-        self.app._toast("已清空名单（恢复默认三只ETF）")
-        self._refresh_chips()
-        self._rebuild_watchlist_rows()
+    # 注：原"自选名单"历史卡已按需求删除；查询记录仍会写入 watchlist
+    # （供快捷按钮前3个与批量页"近期查询"按钮使用），长按快捷按钮可移除单条。
 
     # ------------------------------------------------------------------
     # 交互
@@ -382,10 +306,9 @@ class NiumenPage:
             self.bars = indicator.compute(self.rows, self.version)
             self.sel_idx = len(self.bars) - 1
             self._update_all()
-            # 记录查询名单（最新在前）
+            # 记录查询名单（最新在前；供快捷按钮与批量"近期查询"使用）
             self.app.watchlist.touch(code, self.stock_name)
             self._refresh_chips()
-            self._rebuild_watchlist_rows()
             self.app.notify_first_load_done()
         except Exception:  # noqa: BLE001
             self.app.show_loading(False)

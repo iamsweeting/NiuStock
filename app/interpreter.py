@@ -114,23 +114,38 @@ def interpret(bar, version):
     if has_cost and cbx60 is not None and nml is not None and c < nml and c >= cbx60:
         levels.append(("提示", "回踩观察位", cbx60, "若回踩不破，是较好的加仓观察位"))
 
-    # ---- 概述段落 ----
+    # ---- 概述段落（只讲相对位置与线序，不再引用各线数值）----
     parts = []
+    # 1) 收盘价相对各线的位置（数值无关）
+    if qrl is not None and c >= qrl:
+        parts.append("收盘已站上强阻力线，处于强势区")
+    elif nml is not None and c >= nml:
+        parts.append("收盘位于牛门线与强阻力线之间，突破确认区")
+    elif smx is not None and c >= smx:
+        parts.append("收盘位于生命线上方、牛门线下方，待突破区")
+    elif smx is not None:
+        parts.append("收盘跌破生命线，弱势区")
+    # 2) 成本线关系
     if has_cost:
-        parts.append("短期成本支撑牢固" if (cbx20 is not None and c >= cbx20) else "短期成本承压")
+        parts.append("短期成本提供支撑" if (cbx20 is not None and c >= cbx20) else "短期成本承压")
         parts.append("中期成本已收复" if (cbx60 is not None and c >= cbx60) else "中期成本尚未收复")
     else:
         parts.append("均线系统上方运行" if (smx is not None and c >= smx) else "均线系统下方运行")
-    if nml is not None:
-        if c < nml:
-            parts.append("上方 NML（%s）仍未突破" % fmt_price(nml))
-        elif qrl is not None and c >= qrl:
-            parts.append("已突破强阻力 QRL（%s）" % fmt_price(qrl))
+    # 3) 五线线序（从高到低；相对位置比数值更重要）
+    order_items = []
+    for k, v in (("QRL", qrl), ("NML", nml), ("SMX", smx),
+                 ("CBX20", cbx20), ("CBX60", cbx60)):
+        if v is not None:
+            order_items.append((k, v))
+    order_items.sort(key=lambda x: x[1], reverse=True)
+    order_str = " > ".join(k for k, _v in order_items)
+    if len(order_items) >= 3:
+        keys = [k for k, _v in order_items]
+        if keys[:3] == ["QRL", "NML", "SMX"]:
+            parts.append("核心线序 QRL>NML>SMX 呈多头排列")
         else:
-            parts.append("刚突破 NML（%s）" % fmt_price(nml))
-    # 注：回踩观察位提示只保留在 levels（含数值的结构化条目），
-    # 不在 summary 末尾重复，避免同一提示出现两次。
-    summary = "当前结构%s —— %s，属于“%s”的阶段。" % (verdict, "，".join(parts), stage)
+            parts.append("线序 %s" % order_str)
+    summary = "结构%s；阶段：%s。%s。" % (verdict, stage, "；".join(parts))
 
     return {
         "verdict": verdict,

@@ -47,11 +47,35 @@ class BatchPage:
     # 构建
     # ------------------------------------------------------------------
     def build(self, box):
+        # 需求：允许默认输入（预填三只默认ETF，也可修改）
         self.code_input = MDTextField(
             hint_text="每行一个代码，如：\n159516\n562800\n159845",
             multiline=True, size_hint_y=None, height=dp(110),
+            text="159516\n562800\n159845",
         )
         box.add_widget(self.code_input)
+
+        # 快捷填充按钮：大盘指数预设 / 近期查询（除大盘外的其它查询）
+        fill_row = MDBoxLayout(
+            orientation="horizontal", size_hint_y=None, height=dp(42), spacing=dp(8),
+        )
+        btn_market = MDRaisedButton(
+            text="大盘", size_hint_x=1, size_hint_y=None, height=dp(36),
+        )
+        btn_market.elevation = 0
+        btn_market.bind(on_release=lambda x: self._fill_market_preset())
+        btn_recent = MDRaisedButton(
+            text="近期查询", size_hint_x=1, size_hint_y=None, height=dp(36),
+        )
+        btn_recent.elevation = 0
+        btn_recent.bind(on_release=lambda x: self._fill_recent_queries())
+        fill_row.add_widget(btn_market)
+        fill_row.add_widget(btn_recent)
+        box.add_widget(fill_row)
+        box.add_widget(MDLabel(
+            text="大盘：A股常见指数+港股+纳斯达克+纽约金+沪金主连（日经/韩股免费源暂不可用）",
+            font_style="Caption", theme_text_color="Hint", adaptive_height=True,
+        ))
 
         # 模式 + 算法 + 日期
         row1 = MDBoxLayout(
@@ -82,9 +106,10 @@ class BatchPage:
         row2 = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(44), spacing=dp(8),
         )
-        # 需求 6：日期仅保留日历图标，不写文字
+        # 需求：日期显示数字（去掉"指定日期"汉语），前面带日历图标
         self.date_label = MDLabel(
-            text="", adaptive_height=True, size_hint_x=1, valign="middle",
+            text=self.target_date.strftime("%Y-%m-%d"),
+            adaptive_height=True, size_hint_x=1, valign="middle",
         )
         date_btn = MDIconButton(
             icon="calendar", theme_icon_color="Custom",
@@ -152,6 +177,25 @@ class BatchPage:
 
     def _on_date(self, value):
         self.target_date = value
+        # 需求：只显示日期数字，去掉汉语
+        self.date_label.text = value.strftime("%Y-%m-%d")
+
+    def _fill_market_preset(self):
+        """「大盘」：填入常见指数/商品代码并自动计算。"""
+        codes = "\n".join(config.MARKET_PRESET_CODES)
+        self.code_input.text = codes
+        self.on_calc()
+
+    def _fill_recent_queries(self):
+        """「近期查询」：填入除大盘预设外的最近查询代码并自动计算。"""
+        items = self.app.watchlist.items()
+        recent = [it["code"] for it in items
+                  if it["code"] not in config.MARKET_PRESET_CODES]
+        if not recent:
+            self.app._toast("暂无近期查询记录")
+            return
+        self.code_input.text = "\n".join(recent)
+        self.on_calc()
 
     def on_calc(self):
         if self._busy:

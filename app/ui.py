@@ -12,20 +12,22 @@
 import os
 import time
 
+from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
 from kivy.graphics import Color, Rectangle
-from kivy.lang import Builder
-from kivy.metrics import dp
+from kivy.metrics import dp, sp
 from kivy.resources import resource_find
+from kivy.uix.behaviors.button import ButtonBehavior
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.image import Image
+from kivy.uix.screenmanager import Screen, ScreenManager
 from kivy.uix.scrollview import ScrollView
 from kivy.utils import get_color_from_hex
 
 from kivymd.app import MDApp
 from kivymd.uix.boxlayout import MDBoxLayout
-from kivymd.uix.bottomnavigation import MDBottomNavigation, MDBottomNavigationItem
+from kivymd.uix.button import MDIconButton
 from kivymd.uix.card import MDCard
 from kivymd.uix.label import MDLabel
 from kivymd.uix.toolbar import MDTopAppBar
@@ -33,6 +35,34 @@ from kivymd.uix.toolbar import MDTopAppBar
 from . import config, diag
 from .diag import status as diag_status
 from .watchlist import Watchlist
+
+# 底部导航标签定义（自定义底栏，替换 KivyMD MDBottomNavigation——
+# 其 1.1.1 + Kivy 2.2.0 组合存在构造崩溃与文字重影问题）
+TAB_DEFS = [
+    ("niumen", "牛门线", "chart-line"),
+    ("pivot", "枢轴点", "calculator"),
+    ("batch", "批量枢轴", "format-list-bulleted"),
+    ("market", "大盘", "finance"),
+]
+
+_IDLE_COLOR = (0.62, 0.66, 0.72, 1.0)
+_ACTIVE_COLOR = get_color_from_hex("#8ab4f8")
+
+
+class _TabItem(ButtonBehavior, MDBoxLayout):
+    """自定义底部导航项：图标 + 文字，点击切换（无放大动画，无重影）。"""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self._name = ""
+        self._icon = None
+        self._label = None
+
+    def on_release(self):
+        try:
+            App.get_running_app()._switch_to(self._name)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _disable_kivymd_elevation_shadows():
@@ -104,125 +134,6 @@ def _disable_kivymd_elevation_shadows():
 
 
 _disable_kivymd_elevation_shadows()
-
-
-def _patch_bottomnav_kivy22():
-    """KivyMD 1.1.1 MDBottomNavigation 在 Kivy 2.2.0 下构造即崩溃的规避。
-
-    根因：各 on_<prop> 处理器（on_text_color_normal 等）在属性默认值派发时
-    访问 self.ids.tab_bar，而构造阶段 ids 尚未由 kv 构建；Kivy 2.2.0 的
-    ObservableDict.__getattr__ 对缺失属性调用 super().__getattr__（object 无此
-    方法）→ AttributeError: 'super' object has no attribute '__getattr__'。
-    牛门线未使用底部导航，故此组合缺陷此前未暴露。
-
-    处理：定义 SafeBottomNav 子类覆写这些处理器为 no-op（对 Kivy 两种
-    on_<prop> 绑定机制均生效）；配色在 nav 构建后手动设置到
-    MDBottomNavigationHeader（类属性），与处理器原行为一致。
-    """
-    try:
-        from kivymd.uix.bottomnavigation import MDBottomNavigation
-
-        class SafeBottomNav(MDBottomNavigation):
-            def on_font_name(self, *a, **k):
-                pass
-
-            def on_selected_color_background(self, *a, **k):
-                pass
-
-            def on_use_text(self, *a, **k):
-                pass
-
-            def on_text_color_normal(self, *a, **k):
-                pass
-
-            def on_text_color_active(self, *a, **k):
-                pass
-
-        _patch_bottomnav_kivy22.SafeBottomNav = SafeBottomNav
-    except Exception:  # noqa: BLE001
-        _patch_bottomnav_kivy22.SafeBottomNav = None
-
-
-_patch_bottomnav_kivy22()
-
-# KivyMD 1.1.1 底部导航 Header 的标签在选中放大时会向上顶到图标；
-# 覆盖其 kv 规则：标签固定在底部、字号封顶，保证不与图标重叠。
-Builder.load_string("""
-#:import md_icons kivymd.icon_definitions.md_icons
-<MDBottomNavigationHeader>
-    md_bg_color: root.panel_color
-    on_press: self.tab.dispatch("on_tab_press")
-    on_release: self.tab.dispatch("on_tab_release")
-    on_touch_down: self.tab.dispatch("on_tab_touch_down", *args)
-    on_touch_move: self.tab.dispatch("on_tab_touch_move", *args)
-    on_touch_up: self.tab.dispatch("on_tab_touch_up", *args)
-    width:
-        root.panel.width / len(root.panel.ids.tab_manager.screens) \\
-        if len(root.panel.ids.tab_manager.screens) != 0 \\
-        else root.panel.width
-    padding:
-        0, "12dp", 0, "12dp" if app.theme_cls.material_style == "M2" else "16dp"
-
-    RelativeLayout:
-        id: item_container
-
-        MDIcon:
-            id: _label_icon
-            icon: root.tab.icon
-            height: self.height
-            badge_icon: root.tab.badge_icon
-            theme_text_color: "Custom"
-            text_color: root._text_color_normal
-            opposite_colors: root.opposite_colors
-            pos: [self.pos[0], self.pos[1]]
-            font_size: "24dp"
-            y: item_container.height - self.height
-            pos_hint:
-                {"center_x": .5, "center_y": .5} \\
-                if not root.panel.use_text else \\
-                {"center_x": .5, "top": 1}
-            on_icon:
-                if self.icon not in md_icons.keys(): \\
-                self.size_hint = (None, None); \\
-                self.width = self.font_size; \\
-                self.height = self.font_size
-
-            canvas.before:
-                Color:
-                    rgba:
-                        ( \\
-                        ( \\
-                        app.theme_cls.disabled_hint_text_color \\
-                        if not root.selected_color_background else \\
-                        root.selected_color_background \\
-                        ) \\
-                        if root.active else \\
-                        (0, 0, 0, 0) \\
-                        ) \\
-                        if app.theme_cls.material_style == "M3" else \\
-                        (0, 0, 0, 0)
-                RoundedRectangle:
-                    radius: [16,]
-                    size: root._selected_region_width, dp(32)
-                    pos:
-                        self.center_x - root._selected_region_width / 2, \\
-                        self.center_y - (dp(16))
-
-        MDLabel:
-            id: _label
-            text: root.tab.text
-            size_hint_x: None
-            text_size: None, None
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: root._text_color_normal
-            opposite_colors: root.opposite_colors
-            font_size: min(root._label_font_size, sp(13))
-            pos_hint: {"center_x": .5}
-            y: "4dp" if app.theme_cls.material_style == "M2" else "6dp"
-            font_style:
-                "Button" if app.theme_cls.material_style == "M2" else "Body2"
-""")
 
 SPLASH_MIN_SEC = 1.8        # 品牌启动页最短停留（需求确认：1~2 秒）
 SPLASH_MAX_SEC = 30.0       # 兜底：最迟移除
@@ -300,30 +211,44 @@ class NiumenApp(MDApp):
         )
         root.add_widget(self.topbar)
 
-        # 底部导航 + 四页（SafeBottomNav：规避 Kivy 2.2.0 下 on_<prop> 访问未构建 ids 的崩溃）
-        nav_cls = getattr(_patch_bottomnav_kivy22, "SafeBottomNav", None) or MDBottomNavigation
-        nav = nav_cls(
-            selected_color_background=get_color_from_hex("#1f3a5f"),
-            text_color_active=(1, 1, 1, 1),
-            text_color_normal=(0.62, 0.66, 0.72, 1),
-            panel_color=get_color_from_hex("#0d1b2a"),
+        # 页面容器（ScreenManager）+ 自定义底部导航栏
+        self.sm = ScreenManager()
+        for name, _text, _icon in TAB_DEFS:
+            self.sm.add_widget(self._build_tab(name))
+        root.add_widget(self.sm)
+
+        # 自定义底部导航（无动画、无重影；选中高亮图标+文字）
+        bar = MDBoxLayout(
+            orientation="horizontal", size_hint_y=None, height=dp(58),
+            md_bg_color=get_color_from_hex("#0d1b2a"),
         )
-        nav.add_widget(self._build_niumen_tab())
-        nav.add_widget(self._build_pivot_tab())
-        nav.add_widget(self._build_batch_tab())
-        nav.add_widget(self._build_market_tab())
-        # 页面切换：进入大盘信息页时自动刷新（TTL 冷却，低请求量防反爬）
-        nav.bind(on_switch_tabs=self._on_switch_tabs)
-        # 手动应用底部导航配色（on_<prop> 处理器已被补丁禁用，见 _patch_bottomnav_kivy22）
-        try:
-            from kivymd.uix.bottomnavigation import MDBottomNavigationHeader
-            MDBottomNavigationHeader.text_color_normal = (0.62, 0.66, 0.72, 1)
-            MDBottomNavigationHeader.text_color_active = (1, 1, 1, 1)
-            MDBottomNavigationHeader.selected_color_background = get_color_from_hex("#1f3a5f")
-            MDBottomNavigationHeader.panel_color = get_color_from_hex("#0d1b2a")
-        except Exception:  # noqa: BLE001
-            pass
-        root.add_widget(nav)
+        self._tabs = {}
+        for name, text, icon in TAB_DEFS:
+            tab = _TabItem(
+                orientation="vertical", size_hint_x=1, size_hint_y=None,
+                height=dp(58), spacing=dp(0),
+            )
+            tab._name = name
+            ico = MDIconButton(
+                icon=icon, theme_icon_color="Custom", icon_color=_IDLE_COLOR,
+                size_hint=(None, None), size=(dp(30), dp(30)),
+                pos_hint={"center_x": 0.5},
+            )
+            ico.disabled = True  # 触摸交给 _TabItem(ButtonBehavior) 处理
+            lb = MDLabel(
+                text=text, font_style="Caption", font_size=sp(10),
+                halign="center", size_hint_y=None, height=dp(18),
+                theme_text_color="Custom", text_color=_IDLE_COLOR,
+            )
+            tab.add_widget(ico)
+            tab.add_widget(lb)
+            tab._icon = ico
+            tab._label = lb
+            bar.add_widget(tab)
+            self._tabs[name] = tab
+        root.add_widget(bar)
+        self.sm.current = "niumen"
+        self._select_tab("niumen")
 
         # 加载蒙层（全屏半透明，位于导航之上）
         self.loader = FloatLayout()
@@ -355,63 +280,17 @@ class NiumenApp(MDApp):
         self._start_watchdog()
         return self.screen
 
-    def _build_niumen_tab(self):
+    def _build_tab(self, name):
+        """构建一个页面 Screen（ScrollView + 内容盒），并注册页面实例。"""
         from .ui_niumen import NiumenPage
-        item = MDBottomNavigationItem(name="niumen", text="牛门线", icon="chart-line")
-        body = ScrollView(do_scroll_x=False, bar_width=dp(4))
-        box = MDBoxLayout(
-            orientation="vertical",
-            padding=[dp(12), dp(8), dp(12), dp(24)],
-            spacing=dp(10),
-            size_hint_y=None,
-        )
-        box.bind(minimum_height=box.setter("height"))
-        body.add_widget(box)
-        page = NiumenPage(self)
-        page.build(box)
-        item.add_widget(body)
-        self.pages["niumen"] = page
-        return item
-
-    def _build_pivot_tab(self):
         from .ui_pivot import PivotPage
-        item = MDBottomNavigationItem(name="pivot", text="枢轴点", icon="calculator")
-        body = ScrollView(do_scroll_x=False, bar_width=dp(4))
-        box = MDBoxLayout(
-            orientation="vertical",
-            padding=[dp(12), dp(8), dp(12), dp(24)],
-            spacing=dp(10),
-            size_hint_y=None,
-        )
-        box.bind(minimum_height=box.setter("height"))
-        body.add_widget(box)
-        page = PivotPage(self)
-        page.build(box)
-        item.add_widget(body)
-        self.pages["pivot"] = page
-        return item
-
-    def _build_batch_tab(self):
         from .ui_batch import BatchPage
-        item = MDBottomNavigationItem(name="batch", text="批量枢轴", icon="format-list-bulleted")
-        body = ScrollView(do_scroll_x=False, bar_width=dp(4))
-        box = MDBoxLayout(
-            orientation="vertical",
-            padding=[dp(12), dp(8), dp(12), dp(24)],
-            spacing=dp(10),
-            size_hint_y=None,
-        )
-        box.bind(minimum_height=box.setter("height"))
-        body.add_widget(box)
-        page = BatchPage(self)
-        page.build(box)
-        item.add_widget(body)
-        self.pages["batch"] = page
-        return item
-
-    def _build_market_tab(self):
         from .ui_market import MarketPage
-        item = MDBottomNavigationItem(name="market", text="大盘", icon="finance")
+        makers = {
+            "niumen": NiumenPage, "pivot": PivotPage,
+            "batch": BatchPage, "market": MarketPage,
+        }
+        scr = Screen(name=name)
         body = ScrollView(do_scroll_x=False, bar_width=dp(4))
         box = MDBoxLayout(
             orientation="vertical",
@@ -421,17 +300,20 @@ class NiumenApp(MDApp):
         )
         box.bind(minimum_height=box.setter("height"))
         body.add_widget(box)
-        page = MarketPage(self)
+        page = makers[name](self)
         page.build(box)
-        item.add_widget(body)
-        self.pages["market"] = page
-        return item
+        scr.add_widget(body)
+        self.pages[name] = page
+        return scr
 
-    def _on_switch_tabs(self, instance, tab, *args):
-        """切换到底部导航某页：大盘信息页自动刷新（TTL 冷却）；
-        枢轴点页默认股票与牛门线保持同一个（需求 4）。"""
+    def _switch_to(self, name):
+        """切换页面：同步 ScreenManager 与底栏高亮；
+        大盘页自动刷新（TTL 冷却）；枢轴点默认代码与牛门线同步。"""
+        if name == self.sm.current:
+            return
+        self.sm.current = name
+        self._select_tab(name)
         try:
-            name = getattr(tab, "name", "")
             if name == "market":
                 page = self.pages.get("market")
                 if page is not None:
@@ -442,6 +324,15 @@ class NiumenApp(MDApp):
                     page.sync_default_code(self.last_code)
         except Exception:  # noqa: BLE001
             pass
+
+    def _select_tab(self, name):
+        for n, tab in self._tabs.items():
+            sel = (n == name)
+            try:
+                tab._icon.icon_color = _ACTIVE_COLOR if sel else _IDLE_COLOR
+                tab._label.text_color = (1, 1, 1, 1) if sel else _IDLE_COLOR
+            except Exception:  # noqa: BLE001
+                pass
 
     # ------------------------------------------------------------------
     # 品牌启动页（需求 2：文字在背景中清晰可见）
