@@ -11,7 +11,7 @@ import traceback
 # 确保项目根目录可被导入（桌面运行与 Android 均适用）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app.diag import make_status_label, status  # noqa: E402
+from app.diag import status  # noqa: E402
 
 status("进程启动（python 入口）")
 
@@ -63,7 +63,8 @@ def _install_crash_hooks():
 if __name__ == "__main__":
     _install_crash_hooks()
     app = NiumenApp()
-    app.status_label = make_status_label()
+    # 注：不再创建窗口级"牛票启动中…"状态标签（曾导致切页后文字残留）；
+    # 启动进度由 ui.py 的品牌启动页展示，日志见 logcat/startup.log。
     status("App 实例创建完成，启动 Kivy 事件循环")
     try:
         app.run()

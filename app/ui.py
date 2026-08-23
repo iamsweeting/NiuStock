@@ -15,6 +15,7 @@ import time
 from kivy.app import App
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
+from kivy.core.window import Window
 from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp, sp
 from kivy.resources import resource_find
@@ -309,9 +310,10 @@ class NiumenApp(MDApp):
     def _switch_to(self, name):
         """切换页面：同步 ScreenManager 与底栏高亮；
         大盘页自动刷新（TTL 冷却）；枢轴点默认代码与牛门线同步。
-        每次切换兜底移除启动状态标签（防止"牛票启动中…"残留）。"""
+        每次切换强制移除启动蒙层与状态标签（杜绝"牛票启动中…"残留）。"""
         if name == self.sm.current:
             return
+        self._remove_splash()
         self._remove_status_label()
         self.sm.current = name
         self._select_tab(name)
@@ -341,12 +343,14 @@ class NiumenApp(MDApp):
     # ------------------------------------------------------------------
     def _build_splash(self):
         self.splash = FloatLayout(size_hint=(1, 1))
+        # 背景用固定窗口尺寸：Adreno 上 canvas 自动变换失效（画到窗口原点），
+        # 用 pos=(0,0)+Window.size 无论如何都能盖满整个窗口
         with self.splash.canvas.before:
             Color(0.02, 0.05, 0.09, 0.97)
-            self.splash._bg_rect = Rectangle(pos=self.splash.pos, size=self.splash.size)
+            self.splash._bg_rect = Rectangle(pos=(0, 0), size=Window.size)
+        Window.bind(size=lambda w, v: setattr(self.splash._bg_rect, "size", v))
         self.splash.bind(
-            pos=lambda o, *a: setattr(o._bg_rect, "pos", o.pos),
-            size=lambda o, *a: setattr(o._bg_rect, "size", o.size),
+            size=lambda o, *a: setattr(o._bg_rect, "size", Window.size),
         )
 
         icon_path = resource_find("app/assets/icon.png")
@@ -399,9 +403,10 @@ class NiumenApp(MDApp):
         if self._splash_removed:
             return
         self._splash_removed = True
+        # 从任意父节点移除（不依赖 self.screen 引用，杜绝残留）
         try:
             if self.splash is not None and self.splash.parent is not None:
-                self.screen.remove_widget(self.splash)
+                self.splash.parent.remove_widget(self.splash)
         except Exception:  # noqa: BLE001
             pass
         diag.set_progress_cb(None)
