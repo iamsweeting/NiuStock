@@ -117,7 +117,7 @@ class NiumenPage:
             b = MDRaisedButton(
                 text=name, size_hint_x=1, size_hint_y=None, height=height,
                 md_bg_color=CHIP_BG, text_color=(1, 1, 1, 1),
-                font_size=dp(font), halign="center", valign="middle",
+                font_size=dp(font), halign="center", valign="center",
             )
             b.elevation = 0
             if n > 4:
