@@ -95,6 +95,10 @@ def interpret(bar, version):
     else:
         verdict, vcolor = "偏空", COLOR_DOWN
 
+    # ---- 操作建议（需求：结构判断给出买卖参考） ----
+    advice, advice_color = _advice_for(score, c, qrl, nml, smx,
+                                       cbx20, cbx60, has_cost)
+
     # ---- 关键位清单 ----
     levels = []
     if nml is not None:
@@ -155,4 +159,26 @@ def interpret(bar, version):
         "levels": levels,
         "flags": flags,
         "score": score,
+        "advice": advice,
+        "advice_color": advice_color,
     }
+
+
+def _advice_for(score, c, qrl, nml, smx, cbx20, cbx60, has_cost):
+    """根据结构得分给出买卖参考建议。
+
+    规则：
+      - 强势（站上 QRL / 5 分以上）：持股/可低吸，回踩不破加仓
+      - 偏多（站上 NML / 3-4 分）：逢低分批买入，突破 QRL 加仓
+      - 震荡（2-3 分）：观望为主，等方向明确
+      - 偏空（<2 分或跌破生命线）：反弹减仓/回避，等企稳
+    """
+    if score >= 5:
+        return "持股为主，回踩不破可低吸加仓", COLOR_UP
+    if score >= 3:
+        return "逢低分批买入，站稳强阻力线后可加仓", COLOR_UP
+    if score >= 2:
+        return "观望为主，等突破或回踩确认再动", COLOR_MID
+    if smx is not None and c < smx:
+        return "反弹减仓，跌破生命线宜回避", COLOR_DOWN
+    return "观望，暂不宜追高", COLOR_NEUTRAL

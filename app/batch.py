@@ -10,11 +10,31 @@ from .pivot import parse_batch_codes  # noqa: F401  （批量代码解析入口�
 
 
 def truncate_name(name, max_chars=6):
-    """超长名称截断为 max_chars-1 字符 + 省略号。"""
+    """按显示宽度截断：优先保留完整名称（最多 2 行可放下）。
+
+    需求：名称若 1 行能放下则直接完整显示（必要时以一个点省略）；
+    超过 1 行但 2 行可放下时写全名换行；2 行仍放不下才用"…"。
+    max_chars 为单行可容纳字符数（估算），此处仅用于单行省略场景。
+    """
     name = str(name)
     if len(name) <= max_chars:
         return name
-    return name[:max_chars - 1] + "…"
+    return name
+
+
+def name_display(name, chars_per_line=5, max_lines=2):
+    """返回 (显示文本, 所需行数)。规则：
+      - ≤ chars_per_line：1 行完整显示（过长用省略号？不，1行能放下就直接完整）
+      - ≤ chars_per_line * max_lines：写全名换行（2 行）
+      - 超过：截断为 chars_per_line*max_lines - 1 + "…"
+    """
+    name = str(name)
+    n = len(name)
+    if n <= chars_per_line:
+        return name, 1
+    if n <= chars_per_line * max_lines:
+        return name, 2
+    return name[:chars_per_line * max_lines - 1] + "…", 2
 
 
 def get_name_font_size(name):

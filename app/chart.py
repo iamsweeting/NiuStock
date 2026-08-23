@@ -33,6 +33,8 @@ class NMLChart(Widget):
         self._lines = []
         self._last_idx = 0
         self.bind(pos=self._redraw, size=self._redraw)
+        # 纵坐标标签：用 Label 纹理绘制在 canvas 上（与蜡烛同一变换，
+        # Adreno 上子控件定位不可靠，改为纹理绘制保证对齐与可见）
         self._axis_labels = []
         for _ in range(4):
             lb = Label(
@@ -40,9 +42,7 @@ class NMLChart(Widget):
                 size_hint=(None, None), size=(dp(56), dp(16)),
                 halign="right", valign="middle",
             )
-            # text_size 必须设置，halign/valign 才生效（否则数字靠左上角）
             lb.bind(size=lambda o, *a: setattr(o, "text_size", (o.width, o.height)))
-            self.add_widget(lb)
             self._axis_labels.append(lb)
 
     def set_data(self, bars, lines, last_idx):
@@ -133,13 +133,24 @@ class NMLChart(Widget):
                         Rectangle(pos=(xx - 1, yy - 1), size=(2, 2))
             PopMatrix()
 
-        # 纵坐标标签（4 档）：子控件 pos 相对父级（左下原点、y 向上），
-        # 不可再加 self.x/self.y（否则双重偏移导致数字跑到屏外/错位）
+        # 纵坐标标签（4 档）：以 Label 纹理绘制在 canvas 内，
+        # 与蜡烛共用 PushMatrix+Translate 变换，保证对齐且可见。
         for idx, frac in enumerate((0.0, 1 / 3, 2 / 3, 1.0)):
             p = lo + (hi - lo) * frac
             lb = self._axis_labels[idx]
             lb.text = "%.2f" % p
-            lb.pos = (dp(2), pad_t + frac * plot_h - dp(7))
+            lb.texture_update()
+            tex = lb.texture
+            if tex is None:
+                continue
+            with self.canvas:
+                PushMatrix()
+                Translate(self.pos[0], self.pos[1])
+                Color(*_AXIS_COLOR)
+                Rectangle(texture=tex,
+                          pos=(pad_l - tex.width - dp(4), Y(p) - tex.height / 2.0),
+                          size=tex.size)
+                PopMatrix()
 
 
 class VolumePanel(Widget):

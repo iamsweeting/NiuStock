@@ -251,6 +251,10 @@ class NiumenPage:
             text="结构判断：—", font_style="H6", adaptive_height=True,
             theme_text_color="Custom", text_color=config.COLOR_UP,
         )
+        self.advice_label = MDLabel(
+            text="操作建议：—", font_style="H6", adaptive_height=True,
+            theme_text_color="Custom", text_color=config.COLOR_UP,
+        )
         self.stage_label = MDLabel(text="阶段：—", font_style="Subtitle1", adaptive_height=True)
         self.summary_label = MDLabel(
             text="", markup=True, font_style="Body1",
@@ -260,6 +264,7 @@ class NiumenPage:
             text="", markup=True, font_style="Body2", adaptive_height=True,
         )
         self.judgment_card.add_widget(self.verdict_label)
+        self.judgment_card.add_widget(self.advice_label)
         self.judgment_card.add_widget(self.stage_label)
         self.judgment_card.add_widget(MDSeparator())
         self.judgment_card.add_widget(self.summary_label)
@@ -457,6 +462,8 @@ class NiumenPage:
         res = interpreter.interpret(b, self.version)
         self.verdict_label.text = "结构判断：%s" % res["verdict"]
         self.verdict_label.text_color = res["verdict_color"]
+        self.advice_label.text = "操作建议：%s" % res["advice"]
+        self.advice_label.text_color = res["advice_color"]
         self.stage_label.text = "阶段：%s" % res["stage"]
         self.summary_label.text = res["summary"]
         # 关键位不再重复数值（数值已在图下方"分析"卡的明细中列出；需求 2）

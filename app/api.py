@@ -63,7 +63,7 @@ def detect_version(code):
     """按代码自动选择牛门线版本。
 
     - sh000xxx（上证系列指数）/ sz399xxx（深证系列指数）→ 指数版
-    - A股个股（sh60x / sz0x / sz3x / bj）→ 标的版
+    - A股个股 / ETF（sh5x、sz1x/15x/16x 等）→ 标的版（含成本线 CBX20/CBX60）
     - 其他（港股、美股、期货、HSTECH 等英文代码）→ 基础主图版
     """
     code = normalize_code(code)

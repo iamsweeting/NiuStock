@@ -50,6 +50,27 @@ def test_weak_trend():
     assert "走弱" in res["stage"]
 
 
+def test_advice_present_and_color():
+    # 强势（≥5分）→ 持股/低吸建议
+    res = interpreter.interpret(_bar(11.5), config.VERSION_STOCK)
+    assert res["advice"]
+    assert "买入" in res["advice"] or "持股" in res["advice"] or "低吸" in res["advice"]
+    assert res["advice_color"] == interpreter.COLOR_UP
+    # 弱市 → 减仓/回避
+    res2 = interpreter.interpret(
+        _bar(6.0, nml=10.0, qrl=11.0, smx=9.0, cbx20=8.5, cbx60=8.0),
+        config.VERSION_STOCK,
+    )
+    assert "减仓" in res2["advice"] or "回避" in res2["advice"]
+    assert res2["advice_color"] == interpreter.COLOR_DOWN
+
+
+def test_advice_basic_version():
+    b = {"close": 9.2, "nml": 10.0, "qrl": 11.0, "smx": 9.0}
+    res = interpreter.interpret(b, config.VERSION_BASIC)
+    assert res["advice"]
+
+
 def test_basic_version_no_cost_lines():
     b = {"close": 9.2, "nml": 10.0, "qrl": 11.0, "smx": 9.0}
     res = interpreter.interpret(b, config.VERSION_BASIC)

@@ -60,7 +60,7 @@ class _Cell(Label):
     """
 
     def __init__(self, text="", color=(1, 1, 1, 1), bg=_BG_NONE,
-                 bold=False, size_hint_x=1, on_copy=None, **kw):
+                 bold=False, size_hint_x=1, on_copy=None, wrap=False, **kw):
         # 自适应字号：优先按单元格宽度估算，未知宽度时按文本长度分级
         n = len(text)
         w_dp = kw.get("width")
@@ -80,8 +80,9 @@ class _Cell(Label):
         )
         self.bg_color = bg
         self._bg = None
+        self._wrap = wrap
         self.bind(size=self._apply_bg, pos=self._apply_bg)
-        # text_size 跟随尺寸：防止长文本溢出到相邻单元格
+        # text_size 跟随尺寸：防止长文本溢出到相邻单元格；wrap 时允许换行（不限高）
         self.bind(size=self._clip_text)
         self._clip_text()
         self._apply_bg()
@@ -89,7 +90,10 @@ class _Cell(Label):
 
     def _clip_text(self, *a):
         try:
-            self.text_size = (self.width, self.height)
+            if self._wrap:
+                self.text_size = (self.width, None)
+            else:
+                self.text_size = (self.width, self.height)
         except Exception:  # noqa: BLE001
             pass
 

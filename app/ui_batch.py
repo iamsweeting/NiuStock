@@ -328,11 +328,17 @@ class BatchPage:
         self.results_box.add_widget(hrow)
 
         for r in rows:
-            row = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(28))
-            name = batch.truncate_name(r["name"], 6)
+            # 名称显示规则：1行放下直接完整；2行放下写全名换行；2行仍放不下才"…"
+            name_text, name_lines = batch.name_display(r["name"], chars_per_line=5)
+            row_h = dp(44) if name_lines >= 2 else dp(28)
+            row = BoxLayout(orientation="horizontal", size_hint_y=None, height=row_h)
+            name_cell = _Cell(name_text,
+                              _GREY if r["status"] == "error" else (1, 1, 1, 1),
+                              size_hint_x=None, width=dp(56), on_copy=copy_cb,
+                              wrap=name_lines >= 2)
             cells = [
                 (r["code"], _GREY, 50),
-                (name, _GREY if r["status"] == "error" else (1, 1, 1, 1), 56),
+                (name_cell, None, None),
                 (r["pp"], _BLUE, 38),
                 (r["r1"], _RED, 38), (r["s1"], _GREEN, 38),
                 (r["r2"], _RED, 38), (r["s2"], _GREEN, 38),
@@ -340,6 +346,9 @@ class BatchPage:
                 (r["r4"], _RED, 38), (r["s4"], _GREEN, 38),
             ]
             for text, color, w in cells:
+                if isinstance(text, _Cell):
+                    row.add_widget(text)
+                    continue
                 row.add_widget(_Cell(str(text), color=color,
                                      size_hint_x=None, width=dp(w), on_copy=copy_cb))
             self.results_box.add_widget(row)
