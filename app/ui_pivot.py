@@ -53,20 +53,45 @@ _VERIFY_LABEL = {
 
 
 class _Cell(Label):
-    """带背景色的单元格（纯 Kivy 绘制，规避 KivyMD 阴影着色器）。"""
+    """带背景色的单元格（纯 Kivy 绘制，规避 KivyMD 阴影着色器）。
+
+    需求：批量表格长数值（如 2083.45）曾溢出覆盖相邻单元格。
+    修复：按文本长度与单元格宽度自适应字号，并用 text_size 裁剪防溢出。
+    """
 
     def __init__(self, text="", color=(1, 1, 1, 1), bg=_BG_NONE,
                  bold=False, size_hint_x=1, on_copy=None, **kw):
+        # 自适应字号：优先按单元格宽度估算，未知宽度时按文本长度分级
+        n = len(text)
+        w_dp = kw.get("width")
+        if w_dp:
+            w_dp = w_dp / dp(1)
+            fs = min(11, max(7, int(w_dp / max(n * 0.62, 1))))
+        elif n >= 9:
+            fs = 9
+        elif n >= 7:
+            fs = 10
+        else:
+            fs = 11
         super().__init__(
             text=text, color=color, bold=bold,
-            font_size=dp(11), halign="center", valign="middle",
+            font_size=dp(fs), halign="center", valign="middle",
             size_hint=(size_hint_x, None), height=dp(28), **kw,
         )
         self.bg_color = bg
         self._bg = None
         self.bind(size=self._apply_bg, pos=self._apply_bg)
+        # text_size 跟随尺寸：防止长文本溢出到相邻单元格
+        self.bind(size=self._clip_text)
+        self._clip_text()
         self._apply_bg()
         self._on_copy = on_copy
+
+    def _clip_text(self, *a):
+        try:
+            self.text_size = (self.width, self.height)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _apply_bg(self, *a):
         if self.canvas.before:
@@ -139,19 +164,22 @@ class PivotPage:
         # 日期数字与日历图标紧挨（需求：控件靠拢），整组垂直居中
         date_group = MDBoxLayout(
             orientation="horizontal", size_hint=(None, None),
-            size=(dp(170), dp(44)), spacing=dp(2),
+            size=(dp(170), dp(36)), spacing=dp(2),
             pos_hint={"center_y": 0.5},
         )
-        # 固定宽度 + 禁止换行，避免日期被挤成多行
+        # 固定宽度 + text_size 绑定，保证 halign/valign 生效（否则数字偏下）
         self.date_label = MDLabel(
             text=self.target_date.strftime("%Y-%m-%d"),
-            size_hint=(None, None), size=(dp(120), dp(30)),
-            text_size=(None, None),
+            size_hint=(None, None), size=(dp(126), dp(36)),
+            text_size=(dp(126), dp(36)),
             halign="right", valign="middle",
+            pos_hint={"center_y": 0.5},
         )
         date_btn = MDIconButton(
             icon="calendar", theme_icon_color="Custom",
             icon_color=get_color_from_hex("#8ab4f8"),
+            size_hint=(None, None), size=(dp(36), dp(36)),
+            pos_hint={"center_y": 0.5},
         )
         date_btn.bind(on_release=lambda x: self._open_date_picker())
         date_group.add_widget(self.date_label)
@@ -313,6 +341,11 @@ class PivotPage:
 
         name = res["name"]
         self.name_label.text = "名称：%s（%s）" % (name, res["source"])
+        # 本地记录成功查询（供批量页「近期查询」使用，重启保留）
+        try:
+            self.app.watchlist.touch(code, name)
+        except Exception:  # noqa: BLE001
+            pass
         note = res.get("note", "")
         self.calc_info.text = "计算日：%s  ·  开盘 %.3f（迪马克用）%s" % (
             res["calc_date"], res["open"], ("  " + note) if note else "")

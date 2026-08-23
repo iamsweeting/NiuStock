@@ -38,6 +38,7 @@ class MarketPage:
         self.app = app
         self._busy = False
         self._last_refresh = 0.0
+        self._hist_rows = {k: [] for k in _HIST_FIELDS}
 
     # ------------------------------------------------------------------
     # 构建
@@ -138,7 +139,7 @@ class MarketPage:
         return self._row([(c, _HINT, sx) for c, sx in cols])
 
     # ------------------------------------------------------------------
-    # 刷新
+    # 刷新（渐进式：先出骨架，各小节并行抓取完成后逐块填充）
     # ------------------------------------------------------------------
     def refresh_if_stale(self):
         if time.monotonic() - self._last_refresh >= market.REFRESH_TTL:
@@ -154,32 +155,79 @@ class MarketPage:
             return
         self._busy = True
         self.refresh_btn.disabled = True
-        self._set_placeholder()
+        self._build_skeleton()
 
-        def work():
-            data = market.refresh_market()
-            Clock.schedule_once(lambda dt: self._on_data(data), 0)
+        def on_section(key, data):
+            # 工作线程回调 → 切回 UI 线程填充对应小节
+            Clock.schedule_once(lambda dt, k=key, d=data: self._on_section(k, d), 0)
 
-        threading.Thread(target=work, daemon=True).start()
+        def on_done(data):
+            Clock.schedule_once(lambda dt: self._on_done(data), 0)
 
-    def _set_placeholder(self):
-        self.turnover_label.text = "两市成交额：刷新中…"
-        self.median_label.text = "沪深300中位数：刷新中…"
+        threading.Thread(
+            target=lambda: market.refresh_market_progressive(on_section, on_done),
+            daemon=True).start()
+
+    def _build_skeleton(self):
+        """先渲染固定表格骨架 + 「查询中…」占位，保证首屏立刻可见。"""
+        self.ts_label.text = "更新于：刷新中…"
+        self.turnover_label.text = "两市成交额：查询中…"
+        self.median_label.text = "沪深300中位数：查询中…"
+
+        # 指数/品种表格：表头 + 占位行
         self.quotes_box.clear_widgets()
+        self.quotes_box.add_widget(self._head_row([
+            ("名称", 0.46), ("最新", 0.30), ("涨跌%", 0.24)]))
+        self.quotes_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
+
+        # 历史：六个小节各自「标题 + 占位行」
         self.hist_box.clear_widgets()
+        for title in _HIST_TITLES:
+            self.hist_box.add_widget(MDLabel(
+                text=title, font_style="Caption", bold=True,
+                theme_text_color="Custom", text_color=_GREY, adaptive_height=True,
+            ))
+            self.hist_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
         self.error_label.text = ""
 
     # ------------------------------------------------------------------
     # 渲染
     # ------------------------------------------------------------------
-    def _on_data(self, data):
+    def _on_section(self, key, data):
+        """按小节增量填充。"""
+        try:
+            if key == "live_sina":
+                self._render_turnover(data)
+                self._render_quotes(data.get("quotes", []))
+            elif key == "live_yahoo":
+                self._render_quotes(data.get("quotes", []))
+            elif key == "live_median":
+                self._render_median(data)
+            elif key == "hist_kr":
+                kr = data.get("kr", {})
+                if kr.get("三星电子"):
+                    self._render_hist_field("kr_三星电子", kr["三星电子"])
+                if kr.get("SK海力士"):
+                    self._render_hist_field("kr_SK海力士", kr["SK海力士"])
+            elif key in _SECTION_TO_FIELD:
+                field = _SECTION_TO_FIELD[key]
+                self._render_hist_field(field, data.get(field, []))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_done(self, data):
         self._busy = False
         self.refresh_btn.disabled = False
         self._last_refresh = time.monotonic()
         self._last_ts = data.get("ts", "—")
         self.ts_label.text = "更新于：%s" % self._last_ts
-
         live = data.get("live", {})
+        hist = data.get("history", {})
+        errs = list(live.get("errors", [])) + list(hist.get("errors", []))
+        self.error_label.text = ("\n".join("· %s" % e for e in errs[:6])
+                                 if errs else "")
+
+    def _render_turnover(self, live):
         # 两市成交额 + 本日预测额
         t = live.get("turnover_yi")
         p = live.get("turnover_pred_yi")
@@ -195,24 +243,24 @@ class MarketPage:
             parts.append("本日预测额：—")
         self.turnover_label.text = "  ·  ".join(parts)
 
-        # 指数/品种表格
+    def _render_quotes(self, quotes):
+        # 指数/品种表格：与骨架表头对齐，逐行填充
+        if not quotes:
+            return
         self.quotes_box.clear_widgets()
         self.quotes_box.add_widget(self._head_row([
             ("名称", 0.46), ("最新", 0.30), ("涨跌%", 0.24)]))
-        quotes = live.get("quotes", [])
-        if quotes:
-            for q in quotes:
-                color = _RED if q["pct"] >= 0 else _GREEN
-                self.quotes_box.add_widget(self._row([
-                    (q["name"], _GREY, 0.46),
-                    ("%.2f" % q["price"] if q["price"] >= 10 else "%.3f" % q["price"],
-                     _WHITE, 0.30),
-                    ("%s%.2f%%" % ("+" if q["pct"] >= 0 else "", q["pct"]),
-                     color, 0.24),
-                ]))
-        else:
-            self.quotes_box.add_widget(self._row([("暂无行情数据", _HINT, 1.0)]))
+        for q in quotes:
+            color = _RED if q["pct"] >= 0 else _GREEN
+            self.quotes_box.add_widget(self._row([
+                (q["name"], _GREY, 0.46),
+                ("%.2f" % q["price"] if q["price"] >= 10 else "%.3f" % q["price"],
+                 _WHITE, 0.30),
+                ("%s%.2f%%" % ("+" if q["pct"] >= 0 else "", q["pct"]),
+                 color, 0.24),
+            ]))
 
+    def _render_median(self, live):
         # 沪深300中位数（价格 + 乐咕乐股中位数PE）
         med = live.get("csi300_median")
         pe = live.get("hs300_median_pe")
@@ -221,26 +269,16 @@ class MarketPage:
             med_parts.append("中位数PE(TTM)：%s（乐咕乐股）" % ("%.2f" % pe if pe else "—"))
         self.median_label.text = "  ·  ".join(med_parts)
 
-        # 历史（表格化）
-        hist = data.get("history", {})
+    def _render_hist_field(self, key, rows):
+        """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。"""
+        # 重建整个历史区（小节少、行数少，重建代价可忽略）
+        fields = {k: self._hist_rows.get(k, []) for k in _HIST_FIELDS}
+        fields[key] = rows
+        self._hist_rows = fields
         self.hist_box.clear_widgets()
-        self._hist_section("两市成交额（亿元）", hist.get("turnover", []),
-                           fmt=lambda v: "%.0f" % v)
-        self._hist_section("美元兑人民币中间价", hist.get("ccpr", []),
-                           fmt=lambda v: "%.4f" % v)
-        self._hist_section("WTI原油（美元/桶）", hist.get("wti", []),
-                           fmt=lambda v: "%.2f" % v)
-        self._hist_section("伦敦金（美元/盎司）", hist.get("xau", []),
-                           fmt=lambda v: "%.2f" % v)
-        kr = hist.get("kr", {})
-        self._hist_section("韩国半导体 · 三星电子（韩元）", kr.get("三星电子", []),
-                           fmt=lambda v: "%.0f" % v)
-        self._hist_section("韩国半导体 · SK海力士（韩元）", kr.get("SK海力士", []),
-                           fmt=lambda v: "%.0f" % v)
-
-        errs = list(live.get("errors", [])) + list(hist.get("errors", []))
-        self.error_label.text = ("\n".join("· %s" % e for e in errs[:6])
-                                 if errs else "")
+        for fk in _HIST_FIELDS:
+            self._hist_section(_HIST_TITLES[fk], fields[fk],
+                               fmt=_HIST_FMT[fk])
 
     def _hist_section(self, title, rows, fmt):
         self.hist_box.add_widget(MDLabel(
@@ -260,3 +298,35 @@ class MarketPage:
 
 def _hex(col):
     return "#%02x%02x%02x" % (int(col[0] * 255), int(col[1] * 255), int(col[2] * 255))
+
+
+_HIST_TITLES = {
+    "turnover": "两市成交额（亿元）",
+    "ccpr": "美元兑人民币中间价",
+    "wti": "WTI原油（美元/桶）",
+    "xau": "伦敦金（美元/盎司）",
+    "kr_三星电子": "韩国半导体 · 三星电子（韩元）",
+    "kr_SK海力士": "韩国半导体 · SK海力士（韩元）",
+}
+_HIST_FIELDS = {
+    "turnover": "turnover",
+    "ccpr": "ccpr",
+    "wti": "wti",
+    "xau": "xau",
+    "kr_三星电子": "三星电子",
+    "kr_SK海力士": "SK海力士",
+}
+_SECTION_TO_FIELD = {
+    "hist_turnover": "turnover",
+    "hist_ccpr": "ccpr",
+    "hist_wti": "wti",
+    "hist_xau": "xau",
+}
+_HIST_FMT = {
+    "turnover": lambda v: "%.0f" % v,
+    "ccpr": lambda v: "%.4f" % v,
+    "wti": lambda v: "%.2f" % v,
+    "xau": lambda v: "%.2f" % v,
+    "kr_三星电子": lambda v: "%.0f" % v,
+    "kr_SK海力士": lambda v: "%.0f" % v,
+}

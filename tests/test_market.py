@@ -206,3 +206,41 @@ def test_predict_turnover():
 
 def test_refresh_ttl_const():
     assert market.REFRESH_TTL >= 60
+
+
+# --------------------------------------------------------------------------
+# 并行小节合并
+# --------------------------------------------------------------------------
+
+def test_merge_section_live_and_hist():
+    out = market._new_state()
+    market._merge_section(out, "live_sina", {
+        "quotes": [{"name": "上证指数", "price": 3905.2, "pct": 0.04, "src": "新浪"}],
+        "turnover_yi": 8823.0, "turnover_pred_yi": 9600.0,
+        "errors": [], "sources": {"新浪": True},
+    })
+    market._merge_section(out, "hist_turnover", {
+        "turnover": [("2026-08-21", 8823.0)], "errors": [],
+    })
+    market._merge_section(out, "hist_kr", {
+        "kr": {"三星电子": [("08-21", 86000.0)]}, "errors": [],
+    })
+    assert len(out["live"]["quotes"]) == 1
+    assert out["live"]["turnover_yi"] == 8823.0
+    assert out["history"]["turnover"] == [("2026-08-21", 8823.0)]
+    assert out["history"]["kr"]["三星电子"] == [("08-21", 86000.0)]
+    assert out["sources"].get("新浪") is True
+
+
+def test_merge_section_errors_routed():
+    out = market._new_state()
+    market._merge_section(out, "live_yahoo", {"quotes": [], "errors": ["Yahoo挂了"]})
+    market._merge_section(out, "hist_ccpr", {"ccpr": [], "errors": ["货币网挂了"]})
+    assert "Yahoo挂了" in out["live"]["errors"]
+    assert "货币网挂了" in out["history"]["errors"]
+
+
+def test_new_state_shape():
+    out = market._new_state()
+    assert out["live"]["quotes"] == [] and out["live"]["errors"] == []
+    assert out["history"]["turnover"] == [] and out["history"]["kr"] == {}

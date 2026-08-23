@@ -146,5 +146,5 @@ def test_config_pivot_constants():
     assert len(config.PIVOT_ALGORITHMS) == 5
     assert config.DISPLAY_POINTS == 10
     assert config.DEFAULT_WATCHLIST[0]["code"] == "sz159516"
-    assert config.DEFAULT_WATCHLIST[1]["code"] == "sh562800"
+    assert config.DEFAULT_WATCHLIST[1]["code"] == "sh513310"
     assert config.DEFAULT_WATCHLIST[2]["code"] == "sz159845"

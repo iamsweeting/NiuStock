@@ -19,7 +19,7 @@ from kivy.uix.widget import Widget
 from . import config
 from .geometry import map_y
 
-_AXIS_COLOR = (0.68, 0.70, 0.76, 1.0)
+_AXIS_COLOR = (0.78, 0.80, 0.86, 1.0)   # 纵坐标颜色（亮一些，保证可见）
 _LINE_W = 2          # 指标线矩形段厚度（px）
 
 
@@ -37,8 +37,8 @@ class NMLChart(Widget):
         self._axis_labels = []
         for _ in range(4):
             lb = Label(
-                text="", font_size=dp(9), color=_AXIS_COLOR,
-                size_hint=(None, None), size=(dp(56), dp(14)),
+                text="", font_size=dp(11), color=_AXIS_COLOR,
+                size_hint=(None, None), size=(dp(56), dp(16)),
                 halign="right", valign="middle",
             )
             self.add_widget(lb)
@@ -92,6 +92,12 @@ class NMLChart(Widget):
                 p = lo + (hi - lo) * i / 6.0
                 Color(1, 1, 1, 0.06)
                 Line(points=[pad_l, Y(p), w - pad_r, Y(p)], width=1)
+            # 纵坐标刻度（Rectangle 在 Adreno 上可靠；Line 会涂抹/不渲染）
+            for i in range(6):
+                p = lo + (hi - lo) * i / 6.0
+                y = Y(p)
+                Color(*_AXIS_COLOR)
+                Rectangle(pos=(pad_l - dp(7), y - 1), size=(dp(7), 2))
             # 蜡烛
             for i, b in enumerate(self._bars):
                 x = pad_l + step * i + step / 2.0

@@ -26,6 +26,9 @@ from . import api, batch, config, pivot
 from .clipboard import copy_text
 from .ui_pivot import _Cell, MODE_DAILY, MODE_WEEKLY
 
+# 大盘预设码的规范化集合（供"近期查询"过滤与查询记录排除大盘码用）
+_PRESET_NORM = {api.normalize_code(c) for c in config.MARKET_PRESET_CODES}
+
 _RED = get_color_from_hex("#ef5350")
 _GREEN = get_color_from_hex("#66bb6a")
 _BLUE = get_color_from_hex("#64b5f6")
@@ -49,9 +52,9 @@ class BatchPage:
     def build(self, box):
         # 需求：允许默认输入（预填三只默认ETF，也可修改）
         self.code_input = MDTextField(
-            hint_text="每行一个代码，如：\n159516\n562800\n159845",
+            hint_text="每行一个代码，如：\n159516\n513310\n159845",
             multiline=True, size_hint_y=None, height=dp(110),
-            text="159516\n562800\n159845",
+            text="159516\n513310\n159845",
         )
         box.add_widget(self.code_input)
 
@@ -115,19 +118,22 @@ class BatchPage:
         # 日期数字与日历图标紧挨（控件靠拢），整组垂直居中；右侧为批量计算按钮
         date_group = MDBoxLayout(
             orientation="horizontal", size_hint=(None, None),
-            size=(dp(170), dp(44)), spacing=dp(2),
+            size=(dp(170), dp(36)), spacing=dp(2),
             pos_hint={"center_y": 0.5},
         )
-        # 固定宽度 + 禁止换行，避免日期被挤成多行
+        # 固定宽度 + text_size 绑定，保证 halign/valign 生效（否则日期数字偏下）
         self.date_label = MDLabel(
             text=self.target_date.strftime("%Y-%m-%d"),
-            size_hint=(None, None), size=(dp(120), dp(30)),
-            text_size=(None, None),
+            size_hint=(None, None), size=(dp(126), dp(36)),
+            text_size=(dp(126), dp(36)),
             halign="right", valign="middle",
+            pos_hint={"center_y": 0.5},
         )
         date_btn = MDIconButton(
             icon="calendar", theme_icon_color="Custom",
             icon_color=get_color_from_hex("#8ab4f8"),
+            size_hint=(None, None), size=(dp(36), dp(36)),
+            pos_hint={"center_y": 0.5},
         )
         date_btn.bind(on_release=lambda x: self._open_date_picker())
         date_group.add_widget(self.date_label)
@@ -204,10 +210,15 @@ class BatchPage:
         self.on_calc()
 
     def _fill_recent_queries(self):
-        """「近期查询」：填入除大盘预设外的最近查询代码并自动计算。"""
+        """「近期查询」：填入除大盘预设外的最近查询代码并自动计算。
+
+        数据来源：本地查询名单（user_data_dir/watchlist.json，重启保留）。
+        记录逻辑：牛门线/枢轴点/批量查询成功即写入（批量排除大盘预设码），
+        最近在前、去重、上限 config.WATCHLIST_LIMIT。
+        """
         items = self.app.watchlist.items()
         recent = [it["code"] for it in items
-                  if it["code"] not in config.MARKET_PRESET_CODES]
+                  if it["code"] not in _PRESET_NORM]
         if not recent:
             self.app._toast("暂无近期查询记录")
             return
@@ -236,6 +247,7 @@ class BatchPage:
         algorithm = config.PIVOT_ALGORITHMS[self.algo_idx]
         weekly = self.mode == MODE_WEEKLY
         total = len(codes)
+        touched = []   # 成功且非大盘预设的查询（供本地近期查询记录）
 
         def work():
             rows = []
@@ -258,23 +270,33 @@ class BatchPage:
                             "s3": piv["s3"], "r4": piv["r4"], "s4": piv["s4"],
                             "status": "ok",
                         })
+                        # 大盘预设码不记入查询名单（避免污染快捷按钮/近期查询）
+                        if code not in _PRESET_NORM:
+                            touched.append((code, res["name"]))
                     else:
                         row["name"] = res.get("msg", "获取失败")[:12]
                 except Exception as e:  # noqa: BLE001
                     row["name"] = ("异常：" + str(e))[:12]
                 rows.append(row)
                 time.sleep(0.3)
-            Clock.schedule_once(lambda dt: self._on_done(rows, algorithm, weekly), 0)
+            Clock.schedule_once(
+                lambda dt: self._on_done(rows, algorithm, weekly, touched), 0)
 
         threading.Thread(target=work, daemon=True).start()
 
     def _set_status(self, text):
         self.status_label.text = text
 
-    def _on_done(self, rows, algorithm, weekly):
+    def _on_done(self, rows, algorithm, weekly, touched=None):
         self._busy = False
         self.calc_btn.disabled = False
         self._rows = rows
+        # 本地记录成功查询（UI 线程执行，避免与牛门线并发写文件）
+        for code, name in (touched or []):
+            try:
+                self.app.watchlist.touch(code, name)
+            except Exception:  # noqa: BLE001
+                pass
         ok, err = batch.batch_summary(rows)
         self.status_label.text = ("就绪 | 共 %d 条 | 成功 %d 失败 %d | 算法：%s | %s"
                                   % (len(rows), ok, err, algorithm,
@@ -295,9 +317,9 @@ class BatchPage:
             else:
                 self.app._toast("复制失败")
 
-        # 表头
-        headers = [("代码", 46), ("名称", 54), ("PP", 32), ("R1", 32), ("S1", 32),
-                   ("R2", 32), ("S2", 32), ("R3", 32), ("S3", 32), ("R4", 32), ("S4", 32)]
+        # 表头（列宽与数据行一致；值列加宽 + 单元格自适应字号，防长数值重叠）
+        headers = [("代码", 50), ("名称", 56), ("PP", 38), ("R1", 38), ("S1", 38),
+                   ("R2", 38), ("S2", 38), ("R3", 38), ("S3", 38), ("R4", 38), ("S4", 38)]
         hrow = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(30))
         for title, w in headers:
             hrow.add_widget(_Cell(title, color=_GREY, bold=True,
@@ -308,13 +330,13 @@ class BatchPage:
             row = BoxLayout(orientation="horizontal", size_hint_y=None, height=dp(28))
             name = batch.truncate_name(r["name"], 6)
             cells = [
-                (r["code"], _GREY, 46),
-                (name, _GREY if r["status"] == "error" else (1, 1, 1, 1), 54),
-                (r["pp"], _BLUE, 32),
-                (r["r1"], _RED, 32), (r["s1"], _GREEN, 32),
-                (r["r2"], _RED, 32), (r["s2"], _GREEN, 32),
-                (r["r3"], _RED, 32), (r["s3"], _GREEN, 32),
-                (r["r4"], _RED, 32), (r["s4"], _GREEN, 32),
+                (r["code"], _GREY, 50),
+                (name, _GREY if r["status"] == "error" else (1, 1, 1, 1), 56),
+                (r["pp"], _BLUE, 38),
+                (r["r1"], _RED, 38), (r["s1"], _GREEN, 38),
+                (r["r2"], _RED, 38), (r["s2"], _GREEN, 38),
+                (r["r3"], _RED, 38), (r["s3"], _GREEN, 38),
+                (r["r4"], _RED, 38), (r["s4"], _GREEN, 38),
             ]
             for text, color, w in cells:
                 row.add_widget(_Cell(str(text), color=color,

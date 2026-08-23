@@ -19,6 +19,7 @@
 所有解析函数为纯函数，便于单元测试（不访问网络）。
 """
 import re
+import threading
 import time
 from datetime import date, datetime, time as dtime, timedelta, timezone
 
@@ -322,61 +323,46 @@ def _pacing(prev, gap=0.25):
 
 
 # --------------------------------------------------------------------------
-# 编排：一页刷新
+# 小节抓取（并行化：每节独立会话/节流，供大盘页渐进填充）
 # --------------------------------------------------------------------------
 
-def refresh_market():
-    """刷新大盘信息：返回 dict，各小节独立容错。
-
-    {
-      "ok": True, "ts": "HH:MM:SS", "sources": {...},
-      "live": {"quotes": [{name, price, pct, src}...], "turnover_yi": float,
-               "turnover_pred_yi": float|None, "csi300_median": float|None,
-               "errors": [str...]},
-      "history": {"turnover": [(date, yi)], "ccpr": [(date, rate)],
-                  "wti": [(date, price)], "xau": [(date, price)],
-                  "kr": {"三星电子": [(date, price)], "SK海力士": [(date, price)]},
-                  "errors": [str...]},
-    }
-    """
+def _sec_live_sina():
+    """实时①：新浪批量行情 + 两市成交额 + 本日预测额。"""
     sess = _session()
-    last = time.monotonic()
-    out = {"ok": True, "ts": _cn_now().strftime("%H:%M:%S"), "sources": {},
-           "live": {"quotes": [], "turnover_yi": None, "turnover_pred_yi": None,
-                    "csi300_median": None, "hs300_median_pe": None, "errors": []},
-           "history": {"turnover": [], "ccpr": [], "wti": [], "xau": [],
-                       "kr": {}, "errors": []}}
-
-    # ---- 一、实时 ----
-    # 1) 新浪批量（含两市成交额）
+    data = {"quotes": [], "errors": []}
     try:
         codes = ",".join(c for c, _n, _t in SINA_LIVE_CODES)
         text = _get_text(sess, SINA_HQ + codes,
                          headers={"Referer": "https://finance.sina.com.cn/"})
         quotes = parse_sina_hq(text)
         amounts = parse_sina_hq_amount(text)
-        out["sources"]["新浪"] = True
         for code, label, _t in SINA_LIVE_CODES:
             if code == "sz399001":
                 continue
             q = quotes.get(code)
             if q:
-                out["live"]["quotes"].append(
+                data["quotes"].append(
                     {"name": label, "price": q["price"], "pct": q["pct"], "src": "新浪"})
             else:
-                out["live"]["errors"].append("%s 无行情" % label)
-        # 两市成交额（上证 + 深证成指）
+                data["errors"].append("%s 无行情" % label)
         sh = amounts.get("sh000001")
         sz = amounts.get("sz399001")
         if sh and sz:
             total = sh + sz
-            out["live"]["turnover_yi"] = round(total / 1e8, 2)
+            data["turnover_yi"] = round(total / 1e8, 2)
             pred = predict_turnover(total)
-            out["live"]["turnover_pred_yi"] = round(pred / 1e8, 2) if pred else None
+            data["turnover_pred_yi"] = round(pred / 1e8, 2) if pred else None
+        data["sources"] = {"新浪": True}
     except Exception as e:  # noqa: BLE001
-        out["live"]["errors"].append("新浪行情：%s" % e)
+        data["errors"].append("新浪行情：%s" % e)
+    return data
 
-    # 2) Yahoo：韩国KOSPI / 日经（Yahoo 限流较严：1.5s 节流 + 重试）
+
+def _sec_live_yahoo():
+    """实时②：韩国KOSPI / 日经225（Yahoo，限流退避）。"""
+    sess = _session()
+    data = {"quotes": [], "errors": []}
+    last = time.monotonic()
     for code, label in YAHOO_LIVE:
         last = _pacing(last, 1.5)
         try:
@@ -387,14 +373,19 @@ def refresh_market():
             pct = 0.0
             if len(_hist) >= 2:
                 pct = (_hist[-1][1] - _hist[-2][1]) / _hist[-2][1] * 100.0
-            out["live"]["quotes"].append(
+            data["quotes"].append(
                 {"name": label, "price": price, "pct": pct, "src": "Yahoo"})
-            out["sources"]["Yahoo"] = True
+            data["sources"] = {"Yahoo": True}
         except Exception as e:  # noqa: BLE001
-            out["live"]["errors"].append("%s：%s" % (label, e))
+            data["errors"].append("%s：%s" % (label, e))
+    return data
 
-    # 3) 沪深300中位数（新浪成分股价格中位数，3 页）+ 乐咕乐股中位数PE(TTM)
-    last = _pacing(last)
+
+def _sec_live_median():
+    """实时③：沪深300中位数（新浪成分 3 页）+ 乐咕乐股中位数PE(TTM)。"""
+    sess = _session()
+    data = {"errors": []}
+    last = time.monotonic()
     prices = []
     try:
         for page in (1, 2, 3):
@@ -406,23 +397,26 @@ def refresh_market():
             if len(prices) < page * 100:
                 break
             last = _pacing(last)
-        out["live"]["csi300_median"] = median_price(prices)
+        data["csi300_median"] = median_price(prices)
     except Exception as e:  # noqa: BLE001
-        out["live"]["errors"].append("沪深300成分：%s" % e)
-    # 乐咕乐股：沪深300市盈率(TTM)中位数（用户指定源）
+        data["errors"].append("沪深300成分：%s" % e)
     last = _pacing(last)
     try:
         text = _get_text(sess, LEGULEGU_HS300, tries=2, pause=1.0)
-        out["live"]["hs300_median_pe"] = parse_legulegu_median_pe(text)
-        out["sources"]["乐咕乐股"] = True
+        data["hs300_median_pe"] = parse_legulegu_median_pe(text)
+        data["sources"] = {"乐咕乐股": True}
     except Exception as e:  # noqa: BLE001
-        out["live"]["errors"].append("乐咕乐股：%s" % e)
+        data["errors"].append("乐咕乐股：%s" % e)
+    return data
 
-    # ---- 二、历史 ----
-    # 1) 两市成交额 5 日（东方财富，重试）
-    last = _pacing(last)
+
+def _sec_hist_turnover():
+    """历史①：两市成交额 5 日（东方财富，重试）。"""
+    sess = _session()
+    data = {"errors": []}
     try:
         em_days = {}
+        last = time.monotonic()
         for secid in ("1.000001", "0.399001"):
             text = _get_text(sess, EM_KLINE, params={
                 "secid": secid, "fields1": "f1,f2,f3",
@@ -434,45 +428,63 @@ def refresh_market():
             for day, _v, amt in parse_em_kline(text):
                 em_days[day] = em_days.get(day, 0.0) + amt
             last = _pacing(last)
-        for day in sorted(em_days)[-5:]:
-            out["history"]["turnover"].append((day, round(em_days[day] / 1e8, 2)))
+        data["turnover"] = [
+            (day, round(em_days[day] / 1e8, 2)) for day in sorted(em_days)[-5:]]
     except Exception as e:  # noqa: BLE001
-        out["history"]["errors"].append("两市成交额历史：%s" % e)
+        data["errors"].append("两市成交额历史：%s" % e)
+    return data
 
-    # 2) 美元中间价 5 日（中国货币网）
-    last = _pacing(last)
+
+def _sec_hist_ccpr():
+    """历史②：美元兑人民币中间价 5 日（中国货币网）。"""
+    sess = _session()
+    data = {"errors": []}
     try:
         end = _cn_now().date()
         text = _get_text(sess, CHINAMONEY_CCPR, params={
             "startDate": (end - timedelta(days=10)).strftime("%Y-%m-%d"),
             "endDate": end.strftime("%Y-%m-%d")},
             headers={"Referer": "https://www.chinamoney.com.cn/chinese/bkccpr/"})
-        out["history"]["ccpr"] = parse_chinamoney(text)
-        out["sources"]["中国货币网"] = True
+        data["ccpr"] = parse_chinamoney(text)
+        data["sources"] = {"中国货币网": True}
     except Exception as e:  # noqa: BLE001
-        out["history"]["errors"].append("中间价：%s" % e)
+        data["errors"].append("中间价：%s" % e)
+    return data
 
-    # 3) 伦敦金 5 日（新浪国际期货日K）
-    last = _pacing(last)
+
+def _sec_hist_xau():
+    """历史③：伦敦金 5 日（新浪国际期货日K）。"""
+    sess = _session()
+    data = {"errors": []}
     try:
         text = _get_text(sess, SINA_GLOBAL_KLINE, params={"symbol": "XAU"},
                          headers={"Referer": "https://finance.sina.com.cn/"})
-        out["history"]["xau"] = parse_sina_global_kline(text)
-        out["sources"]["新浪"] = True
+        data["xau"] = parse_sina_global_kline(text)
+        data["sources"] = {"新浪": True}
     except Exception as e:  # noqa: BLE001
-        out["history"]["errors"].append("伦敦金历史：%s" % e)
+        data["errors"].append("伦敦金历史：%s" % e)
+    return data
 
-    # 3b) WTI 5 日（新浪国际期货日K，避免依赖 Yahoo）
-    last = _pacing(last)
+
+def _sec_hist_wti():
+    """历史③b：WTI 5 日（新浪国际期货日K）。"""
+    sess = _session()
+    data = {"errors": []}
     try:
         text = _get_text(sess, SINA_GLOBAL_KLINE, params={"symbol": "CL"},
                          headers={"Referer": "https://finance.sina.com.cn/"})
-        out["history"]["wti"] = parse_sina_global_kline(text)
-        out["sources"]["新浪"] = True
+        data["wti"] = parse_sina_global_kline(text)
+        data["sources"] = {"新浪": True}
     except Exception as e:  # noqa: BLE001
-        out["history"]["errors"].append("WTI历史：%s" % e)
+        data["errors"].append("WTI历史：%s" % e)
+    return data
 
-    # 4) WTI + 韩国半导体（Yahoo，同样限流退避）
+
+def _sec_hist_kr():
+    """历史④：韩国半导体（三星电子 + SK海力士，Yahoo）。"""
+    sess = _session()
+    data = {"kr": {}, "errors": []}
+    last = time.monotonic()
     for code, label, unit in YAHOO_HISTORY:
         last = _pacing(last, 1.5)
         try:
@@ -480,12 +492,104 @@ def refresh_market():
                              params={"range": "5d", "interval": "1d"},
                              tries=3, pause=1.2)
             _price, hist = parse_yahoo_chart(text)
-            if label == "WTI原油":
-                out["history"]["wti"] = hist
-            else:
-                out["history"]["kr"][label] = hist
-            out["sources"]["Yahoo"] = True
+            data["kr"][label] = hist
+            data["sources"] = {"Yahoo": True}
         except Exception as e:  # noqa: BLE001
-            out["history"]["errors"].append("%s：%s" % (label, e))
+            data["errors"].append("%s：%s" % (label, e))
+    return data
 
+
+_SECTIONS = [
+    ("live_sina", _sec_live_sina),
+    ("live_yahoo", _sec_live_yahoo),
+    ("live_median", _sec_live_median),
+    ("hist_turnover", _sec_hist_turnover),
+    ("hist_ccpr", _sec_hist_ccpr),
+    ("hist_xau", _sec_hist_xau),
+    ("hist_wti", _sec_hist_wti),
+    ("hist_kr", _sec_hist_kr),
+]
+
+_LIVE_KEYS = {"live_sina", "live_yahoo", "live_median"}
+_HIST_KEYS = {"hist_turnover", "hist_ccpr", "hist_xau", "hist_wti", "hist_kr"}
+
+
+def _merge_section(out, key, data):
+    """把单节结果合并进大盘页完整结构。"""
+    live, hist = out["live"], out["history"]
+    data = data or {}
+    if key == "live_sina":
+        live["quotes"].extend(data.get("quotes", []))
+        if data.get("turnover_yi") is not None:
+            live["turnover_yi"] = data["turnover_yi"]
+        if data.get("turnover_pred_yi") is not None:
+            live["turnover_pred_yi"] = data["turnover_pred_yi"]
+    elif key == "live_yahoo":
+        live["quotes"].extend(data.get("quotes", []))
+    elif key == "live_median":
+        live["csi300_median"] = data.get("csi300_median")
+        live["hs300_median_pe"] = data.get("hs300_median_pe")
+    elif key == "hist_turnover":
+        hist["turnover"] = data.get("turnover", [])
+    elif key == "hist_ccpr":
+        hist["ccpr"] = data.get("ccpr", [])
+    elif key == "hist_xau":
+        hist["xau"] = data.get("xau", [])
+    elif key == "hist_wti":
+        hist["wti"] = data.get("wti", [])
+    elif key == "hist_kr":
+        hist["kr"] = data.get("kr", {})
+    for e in data.get("errors", []):
+        (live["errors"] if key in _LIVE_KEYS else hist["errors"]).append(e)
+    for s, v in (data.get("sources") or {}).items():
+        out["sources"][s] = v
+
+
+def _new_state():
+    return {
+        "ok": True, "ts": _cn_now().strftime("%H:%M:%S"), "sources": {},
+        "live": {"quotes": [], "turnover_yi": None, "turnover_pred_yi": None,
+                 "csi300_median": None, "hs300_median_pe": None, "errors": []},
+        "history": {"turnover": [], "ccpr": [], "wti": [], "xau": [],
+                    "kr": {}, "errors": []},
+    }
+
+
+def refresh_market_progressive(on_section, on_done=None):
+    """并行抓取各小节，每节完成后回调 on_section(key, data)。
+
+    data 为小节字典（含 errors/sources）；全部完成后回调 on_done(完整 dict)。
+    """
+    results = {}
+
+    def run(key, fn):
+        try:
+            data = fn()
+        except Exception as e:  # noqa: BLE001
+            data = {"errors": [str(e)]}
+        results[key] = data
+        try:
+            on_section(key, data)
+        except Exception:  # noqa: BLE001
+            pass
+
+    threads = [threading.Thread(target=run, args=(k, f), daemon=True)
+               for k, f in _SECTIONS]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    out = _new_state()
+    for k in _SECTIONS:
+        _merge_section(out, k[0], results.get(k[0]))
+    if on_done:
+        try:
+            on_done(out)
+        except Exception:  # noqa: BLE001
+            pass
     return out
+
+
+def refresh_market():
+    """刷新大盘信息（并行小节后合并，返回完整 dict）。"""
+    return refresh_market_progressive(lambda k, d: None)
