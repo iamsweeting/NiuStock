@@ -115,16 +115,24 @@ class NMLChart(Widget):
                 y2 = Y(min(b["open"], b["close"]))
                 bh = max(y2 - y1, dp(1))
                 Rectangle(pos=(x - cw / 2.0, y1), size=(cw, bh))
-            # 指标线（1px 无宽度，避免 Adreno 上线宽渲染失真）
+            # 指标线：用矩形段绘制（Line 折线在 Adreno 上：width>1 涂抹失真、
+            # width=1 完全不渲染；Rectangle 渲染可靠）
             for _, col, lv in self._lines:
                 pts = []
                 for i, v in enumerate(lv):
                     if v is None:
                         continue
-                    pts += [pad_l + step * i + step / 2.0, Y(v)]
-                if len(pts) >= 4:
-                    Color(*col)
-                    Line(points=pts, width=1)
+                    pts.append((pad_l + step * i + step / 2.0, Y(v)))
+                if len(pts) < 2:
+                    continue
+                Color(*col)
+                for i in range(len(pts) - 1):
+                    x1, y1 = pts[i]
+                    x2, y2 = pts[i + 1]
+                    wseg = abs(x2 - x1)
+                    hseg = abs(y2 - y1) + 2
+                    Rectangle(pos=(min(x1, x2), min(y1, y2) - 1),
+                              size=(wseg, hseg))
             PopMatrix()
 
         # 左侧价格轴标签（4 档：高 / 2/3 / 1/3 / 低）

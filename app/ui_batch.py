@@ -118,10 +118,12 @@ class BatchPage:
             size=(dp(170), dp(44)), spacing=dp(2),
             pos_hint={"center_y": 0.5},
         )
+        # 固定宽度 + 禁止换行，避免日期被挤成多行
         self.date_label = MDLabel(
             text=self.target_date.strftime("%Y-%m-%d"),
-            adaptive_width=True, size_hint=(None, None), height=dp(30),
-            valign="middle",
+            size_hint=(None, None), size=(dp(120), dp(30)),
+            text_size=(None, None),
+            halign="right", valign="middle",
         )
         date_btn = MDIconButton(
             icon="calendar", theme_icon_color="Custom",

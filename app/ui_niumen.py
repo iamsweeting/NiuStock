@@ -187,14 +187,17 @@ class NiumenPage:
         self.info_card.add_widget(self.meta_label)
 
         date_row = MDBoxLayout(
-            orientation="horizontal", size_hint_y=None, height=dp(44), spacing=dp(8),
+            orientation="horizontal", size_hint_y=None, height=dp(44), spacing=dp(4),
         )
         self.date_label = MDLabel(
             text="—", adaptive_height=True, size_hint_x=1, valign="middle",
+            pos_hint={"center_y": 0.5},
         )
         date_btn = MDIconButton(
             icon="calendar", theme_icon_color="Custom",
             icon_color=get_color_from_hex("#8ab4f8"),
+            size_hint=(None, None), size=(dp(36), dp(36)),
+            pos_hint={"center_y": 0.5},
         )
         date_btn.bind(on_release=self.open_date_picker)
         date_row.add_widget(self.date_label)
