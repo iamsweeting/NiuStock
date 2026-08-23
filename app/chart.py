@@ -7,7 +7,10 @@
 不要再用 PushMatrix+Translate 手工补偿——实测手工补偿会二次叠加变换、
 且 Line 带宽度渲染错乱，导致五条线位置失真、部分线被覆盖。
 """
-from kivy.graphics import Color, Line, Rectangle
+from kivy.graphics import (
+    Color, Line, Rectangle,
+    PushMatrix, PopMatrix, Translate,
+)
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
@@ -92,6 +95,10 @@ class NMLChart(Widget):
         cw = min(step * 0.55, dp(20))
 
         with self.canvas:
+            # Adreno 真机 canvas 自动变换失效（实测去掉后内容画到窗口原点），
+            # 必须手动应用 widget 位置；线条用 1px 细线（width>1 会渲染成厚涂抹）
+            PushMatrix()
+            Translate(self.pos[0], self.pos[1])
             # 网格 + 价格坐标
             for i in range(1, 6):
                 p = lo + (hi - lo) * i / 6.0
@@ -103,7 +110,7 @@ class NMLChart(Widget):
                 up = b["close"] >= b["open"]
                 col = config.COLOR_UP if up else config.COLOR_DOWN
                 Color(*col)
-                Line(points=[x, Y(b["high"]), x, Y(b["low"])], width=dp(1.2))
+                Line(points=[x, Y(b["high"]), x, Y(b["low"])], width=1)
                 y1 = Y(max(b["open"], b["close"]))
                 y2 = Y(min(b["open"], b["close"]))
                 bh = max(y2 - y1, dp(1))
@@ -118,6 +125,7 @@ class NMLChart(Widget):
                 if len(pts) >= 4:
                     Color(*col)
                     Line(points=pts, width=1)
+            PopMatrix()
 
         # 左侧价格轴标签（4 档：高 / 2/3 / 1/3 / 低）
         for idx, frac in enumerate((0.0, 1 / 3, 2 / 3, 1.0)):
@@ -139,6 +147,8 @@ class NMLChart(Widget):
             amts.append(a / 1e4)   # 元 → 万元
         amax = max(amts) if amts else 1.0
         with self.canvas:
+            PushMatrix()
+            Translate(self.pos[0], self.pos[1])
             Color(1, 1, 1, 0.05)
             Line(points=[pad_l, panel_top, w - pad_r, panel_top], width=1)
             for i, b in enumerate(self._bars):
@@ -148,6 +158,7 @@ class NMLChart(Widget):
                 bh = max(panel_hh * amts[i] / amax, dp(1))
                 Color(*col)
                 Rectangle(pos=(x - cw / 2.0, panel_top), size=(cw, bh))
+            PopMatrix()
         self.panel_label.pos = (
             self.x + pad_l - dp(8),
             self.y + panel_top - dp(12),
