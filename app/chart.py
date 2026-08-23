@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
-"""牛票图表组件：Canvas 绘制的 10 日 K 线 + 指标线（窗口长度由 config.DISPLAY_POINTS 决定）。
+"""牛票图表组件：Canvas 绘制的 10 日 K 线 + 指标线 + 成交额副图。
 
-注意：Adreno 825 真机上，纯 Widget 的 canvas 指令自动变换矩阵失效
-（指令画在窗口原点），因此所有绘制指令手动包一层
-PushMatrix + Translate(self.pos)，强制应用 widget 位置后再画。
+坐标方向：价格越高绘制位置越靠上（Y(p) 随价格增大而减小，高值在图上方面）。
+左侧为价格数值坐标（4 档），底部为近 10 日成交额（万元）副图。
+注意：真机（Adreno 825）上 widget 的 canvas 自动变换是生效的，
+不要再用 PushMatrix+Translate 手工补偿——实测手工补偿会二次叠加变换、
+且 Line 带宽度渲染错乱，导致五条线位置失真、部分线被覆盖。
 """
-from kivy.graphics import (
-    Color, Line, Rectangle,
-    PushMatrix, PopMatrix, Translate,
-)
+from kivy.graphics import Color, Line, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
@@ -17,36 +16,39 @@ from kivy.uix.widget import Widget
 from . import config
 from .geometry import map_y
 
+_AXIS_COLOR = (0.68, 0.70, 0.76, 1.0)
+_PANEL_H = dp(56)          # 成交额副图高度
+_AXIS_W = dp(64)           # 左侧价格轴预留宽度
+
 
 class NMLChart(Widget):
-    """K线（红涨绿跌）+ NML/QRL/SMX(+CBX20/CBX60) 指标线。
-
-    坐标方向：价格越高绘制位置越靠上（Y(p) 随价格增大而减小，
-    即高值在图上方面——与人类习惯一致）。
-    右上/右下各有一个最高/最低价标签，方便核对方向。
-    """
+    """K线（红涨绿跌）+ NML/QRL/SMX(+CBX20/CBX60) 指标线 + 成交额副图。"""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.size_hint = (1.0, None)
-        self.height = dp(300)
+        self.height = dp(340)
         self._bars = []       # 待绘制的K线（DISPLAY_POINTS 根）
         self._lines = []      # [(标签, 颜色, [DISPLAY_POINTS 个数值])]
         self._last_idx = 0    # 选中日（窗口内下标）
         self.bind(pos=self._redraw, size=self._redraw)
-        # 价格轴标签（普通 Label 控件，不受 canvas 变换问题影响）
-        self.hi_label = Label(
-            text="", font_size=dp(9), color=(0.68, 0.70, 0.76, 1),
-            size_hint=(None, None), size=(dp(72), dp(14)),
-            halign="right", valign="middle",
+        # 左侧价格轴标签（普通 Label 控件）
+        self._axis_labels = []
+        for _ in range(4):
+            lb = Label(
+                text="", font_size=dp(9), color=_AXIS_COLOR,
+                size_hint=(None, None), size=(dp(60), dp(14)),
+                halign="right", valign="middle",
+            )
+            self.add_widget(lb)
+            self._axis_labels.append(lb)
+        # 成交额副图标题
+        self.panel_label = Label(
+            text="成交额(万元)", font_size=dp(8), color=_AXIS_COLOR,
+            size_hint=(None, None), size=(dp(80), dp(12)),
+            halign="left", valign="middle",
         )
-        self.lo_label = Label(
-            text="", font_size=dp(9), color=(0.68, 0.70, 0.76, 1),
-            size_hint=(None, None), size=(dp(72), dp(14)),
-            halign="right", valign="middle",
-        )
-        self.add_widget(self.hi_label)
-        self.add_widget(self.lo_label)
+        self.add_widget(self.panel_label)
 
     def set_data(self, bars, lines, last_idx):
         self._bars = list(bars)
@@ -59,9 +61,10 @@ class NMLChart(Widget):
         if not self._bars or self.width < 10 or self.height < 10:
             return
         w, h = self.width, self.height
-        pad_l, pad_r, pad_t, pad_b = dp(10), dp(10), dp(18), dp(10)
+        pad_l = dp(10) + _AXIS_W
+        pad_r, pad_t, pad_b = dp(10), dp(14), dp(6)
         plot_w = w - pad_l - pad_r
-        plot_h = h - pad_t - pad_b
+        plot_h = h - pad_t - pad_b - _PANEL_H - dp(6)
         if plot_w <= 0 or plot_h <= 0:
             return
 
@@ -80,31 +83,20 @@ class NMLChart(Widget):
         pad = (hi - lo) * 0.08
         lo -= pad
         hi += pad
-        # 最高/最低价标签：高值标签在右上、低值标签在右下
-        self.hi_label.text = "高 %.2f" % hi
-        self.lo_label.text = "低 %.2f" % lo
-        self.hi_label.pos = (self.x + self.width - dp(78), self.y + self.height - dp(15))
-        self.lo_label.pos = (self.x + self.width - dp(78), self.y + dp(1))
 
         def Y(p):
             return map_y(p, lo, hi, pad_t, plot_h)
 
         n = len(self._bars)
         step = plot_w / n
-        # 10 根蜡烛时收窄单根宽度上限，避免过宽
         cw = min(step * 0.55, dp(20))
 
         with self.canvas:
-            # Adreno 真机 canvas 自动变换失效，手动应用 widget 位置
-            PushMatrix()
-            Translate(self.pos[0], self.pos[1])
-
-            # 网格
-            Color(1, 1, 1, 0.06)
+            # 网格 + 价格坐标
             for i in range(1, 6):
                 p = lo + (hi - lo) * i / 6.0
+                Color(1, 1, 1, 0.06)
                 Line(points=[pad_l, Y(p), w - pad_r, Y(p)], width=1)
-
             # K线蜡烛
             for i, b in enumerate(self._bars):
                 x = pad_l + step * i + step / 2.0
@@ -116,8 +108,7 @@ class NMLChart(Widget):
                 y2 = Y(min(b["open"], b["close"]))
                 bh = max(y2 - y1, dp(1))
                 Rectangle(pos=(x - cw / 2.0, y1), size=(cw, bh))
-
-            # 指标线
+            # 指标线（1px 无宽度，避免 Adreno 上线宽渲染失真）
             for _, col, lv in self._lines:
                 pts = []
                 for i, v in enumerate(lv):
@@ -126,9 +117,41 @@ class NMLChart(Widget):
                     pts += [pad_l + step * i + step / 2.0, Y(v)]
                 if len(pts) >= 4:
                     Color(*col)
-                    Line(points=pts, width=dp(1.6))
+                    Line(points=pts, width=1)
 
-            PopMatrix()
+        # 左侧价格轴标签（4 档：高 / 2/3 / 1/3 / 低）
+        for idx, frac in enumerate((0.0, 1 / 3, 2 / 3, 1.0)):
+            p = lo + (hi - lo) * frac
+            lb = self._axis_labels[idx]
+            lb.text = "%.2f" % p
+            lb.pos = (self.x + dp(6), self.y + Y(p) - dp(7))
+
+        # 成交额副图
+        panel_top = pad_t + plot_h + dp(6)
+        panel_bot = h - pad_b
+        panel_hh = panel_bot - panel_top
+        amts = []
+        for b in self._bars:
+            a = b.get("amount")
+            if not a or a <= 0:
+                # 无成交额时用 收盘×成交量 估算（万元）
+                a = b["close"] * b["volume"]
+            amts.append(a / 1e4)   # 元 → 万元
+        amax = max(amts) if amts else 1.0
+        with self.canvas:
+            Color(1, 1, 1, 0.05)
+            Line(points=[pad_l, panel_top, w - pad_r, panel_top], width=1)
+            for i, b in enumerate(self._bars):
+                x = pad_l + step * i + step / 2.0
+                up = b["close"] >= b["open"]
+                col = config.COLOR_UP if up else config.COLOR_DOWN
+                bh = max(panel_hh * amts[i] / amax, dp(1))
+                Color(*col)
+                Rectangle(pos=(x - cw / 2.0, panel_top), size=(cw, bh))
+        self.panel_label.pos = (
+            self.x + pad_l - dp(8),
+            self.y + panel_top - dp(12),
+        )
 
 
 class DateAxis(BoxLayout):

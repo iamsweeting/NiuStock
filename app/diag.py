@@ -54,7 +54,7 @@ def status(msg, show_toast=True):
         except Exception:
             pass
     try:
-        if _status_label is not None:
+        if _status_label is not None and _status_label.parent is not None:
             _status_label.text = "%s\n%s" % (msg, time.strftime("%H:%M:%S"))
     except Exception:
         pass
@@ -65,6 +65,22 @@ def status(msg, show_toast=True):
             pass
     if show_toast:
         _toast(msg)
+
+
+def remove_status_label():
+    """彻底移除屏幕状态标签（并把引用置空，防止任何路径再次显示）。
+
+    修复：切换页面后仍见"牛票启动中…"——标签移除逻辑必须可靠且幂等。
+    """
+    global _status_label
+    try:
+        from kivy.core.window import Window
+        if _status_label is not None:
+            if _status_label.parent is not None:
+                Window.remove_widget(_status_label)
+            _status_label = None
+    except Exception:
+        pass
 
 
 def _toast(text):

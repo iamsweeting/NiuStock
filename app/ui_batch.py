@@ -61,11 +61,13 @@ class BatchPage:
         )
         btn_market = MDRaisedButton(
             text="大盘", size_hint_x=1, size_hint_y=None, height=dp(36),
+            pos_hint={"center_y": 0.5},
         )
         btn_market.elevation = 0
         btn_market.bind(on_release=lambda x: self._fill_market_preset())
         btn_recent = MDRaisedButton(
             text="近期查询", size_hint_x=1, size_hint_y=None, height=dp(36),
+            pos_hint={"center_y": 0.5},
         )
         btn_recent.elevation = 0
         btn_recent.bind(on_release=lambda x: self._fill_recent_queries())
@@ -77,15 +79,17 @@ class BatchPage:
             font_style="Caption", theme_text_color="Hint", adaptive_height=True,
         ))
 
-        # 模式 + 算法 + 日期
+        # 模式 + 算法 + 日期（同行内容垂直居中）
         row1 = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(44), spacing=dp(8),
         )
         self.mode_daily = MDRaisedButton(
             text="按日", size_hint=(None, None), width=dp(56), height=dp(34),
+            pos_hint={"center_y": 0.5},
         )
         self.mode_weekly = MDRaisedButton(
             text="按周", size_hint=(None, None), width=dp(56), height=dp(34),
+            pos_hint={"center_y": 0.5},
         )
         self.mode_daily.elevation = 0
         self.mode_weekly.elevation = 0
@@ -93,12 +97,14 @@ class BatchPage:
         self.mode_weekly.bind(on_release=lambda x: self._set_mode(MODE_WEEKLY))
         self.algo_btn = MDRaisedButton(
             text="", size_hint=(None, None), width=dp(110), height=dp(34),
+            pos_hint={"center_y": 0.5},
         )
         self.algo_btn.elevation = 0
         self.algo_btn.bind(on_release=lambda x: self._cycle_algo())
         row1.add_widget(self.mode_daily)
         row1.add_widget(self.mode_weekly)
         row1.add_widget(self.algo_btn)
+        row1.add_widget(MDLabel(size_hint_x=1))
         box.add_widget(row1)
         self._set_mode(self.mode)
         self._cycle_algo()
@@ -106,23 +112,32 @@ class BatchPage:
         row2 = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(44), spacing=dp(8),
         )
-        # 需求：日期显示数字（去掉"指定日期"汉语），前面带日历图标
+        # 日期数字与日历图标紧挨（控件靠拢），整组垂直居中；右侧为批量计算按钮
+        date_group = MDBoxLayout(
+            orientation="horizontal", size_hint=(None, None),
+            size=(dp(170), dp(44)), spacing=dp(2),
+            pos_hint={"center_y": 0.5},
+        )
         self.date_label = MDLabel(
             text=self.target_date.strftime("%Y-%m-%d"),
-            adaptive_height=True, size_hint_x=1, valign="middle",
+            adaptive_width=True, size_hint=(None, None), height=dp(30),
+            valign="middle",
         )
         date_btn = MDIconButton(
             icon="calendar", theme_icon_color="Custom",
             icon_color=get_color_from_hex("#8ab4f8"),
         )
         date_btn.bind(on_release=lambda x: self._open_date_picker())
+        date_group.add_widget(self.date_label)
+        date_group.add_widget(date_btn)
         self.calc_btn = MDRaisedButton(
             text="批量计算", size_hint=(None, None), width=dp(100), height=dp(36),
+            pos_hint={"center_y": 0.5},
         )
         self.calc_btn.elevation = 0
         self.calc_btn.bind(on_release=lambda x: self.on_calc())
-        row2.add_widget(self.date_label)
-        row2.add_widget(date_btn)
+        row2.add_widget(date_group)
+        row2.add_widget(MDLabel(size_hint_x=1))
         row2.add_widget(self.calc_btn)
         box.add_widget(row2)
 

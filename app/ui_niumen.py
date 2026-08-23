@@ -87,6 +87,7 @@ class NiumenPage:
         row.add_widget(self.input_field)
         btn = MDRaisedButton(
             text="查询", size_hint=(None, None), width=dp(80), height=dp(48),
+            pos_hint={"center_y": 0.5},
         )
         btn.elevation = 0  # 阴影在 Adreno 崩溃
         btn.bind(on_release=lambda x: self.on_query(self.input_field.text))

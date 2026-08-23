@@ -108,6 +108,7 @@ def compute(rows, version):
             "low": lows[i],
             "close": closes[i],
             "volume": vols[i],
+            "amount": rows[i].get("amount"),   # 成交额(元)，供副图使用
         }
         bar["atr"] = atrv[i]
         if hhv[i] is not None and atrv[i] is not None:

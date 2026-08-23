@@ -96,32 +96,35 @@ class PivotPage:
     # 构建
     # ------------------------------------------------------------------
     def build(self, box):
-        # 输入行：代码 + 计算按钮
+        # 输入行：代码 + 计算按钮（同行内容垂直居中）
         row = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(58), spacing=dp(8),
         )
         self.code_field = MDTextField(
             hint_text="股票代码 如 159516 / 600519",
-            size_hint=(1, None), height=dp(56),
+            size_hint=(1, None), height=dp(56), pos_hint={"center_y": 0.5},
         )
         row.add_widget(self.code_field)
         self.calc_btn = MDRaisedButton(
             text="计算", size_hint=(None, None), width=dp(80), height=dp(48),
+            pos_hint={"center_y": 0.5},
         )
         self.calc_btn.elevation = 0
         self.calc_btn.bind(on_release=lambda x: self.on_calc())
         row.add_widget(self.calc_btn)
         box.add_widget(row)
 
-        # 模式 + 日期行
+        # 模式 + 日期行（日期与日历图标紧挨着；同行动态垂直居中）
         mode_row = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(44), spacing=dp(8),
         )
         self.mode_daily = MDRaisedButton(
             text="按日", size_hint=(None, None), width=dp(64), height=dp(36),
+            pos_hint={"center_y": 0.5},
         )
         self.mode_weekly = MDRaisedButton(
             text="按周", size_hint=(None, None), width=dp(64), height=dp(36),
+            pos_hint={"center_y": 0.5},
         )
         self.mode_daily.elevation = 0
         self.mode_weekly.elevation = 0
@@ -130,18 +133,28 @@ class PivotPage:
         mode_row.add_widget(self.mode_daily)
         mode_row.add_widget(self.mode_weekly)
 
-        # 需求：日期显示数字（去掉"指定日期"汉语），前面带日历图标
+        # 弹性占位把日期组推到右侧
+        mode_row.add_widget(MDLabel(size_hint_x=1))
+
+        # 日期数字与日历图标紧挨（需求：控件靠拢），整组垂直居中
+        date_group = MDBoxLayout(
+            orientation="horizontal", size_hint=(None, None),
+            size=(dp(170), dp(44)), spacing=dp(2),
+            pos_hint={"center_y": 0.5},
+        )
         self.date_label = MDLabel(
             text=self.target_date.strftime("%Y-%m-%d"),
-            adaptive_height=True, size_hint_x=1, valign="middle",
+            adaptive_width=True, size_hint=(None, None), height=dp(30),
+            valign="middle",
         )
         date_btn = MDIconButton(
             icon="calendar", theme_icon_color="Custom",
             icon_color=get_color_from_hex("#8ab4f8"),
         )
         date_btn.bind(on_release=lambda x: self._open_date_picker())
-        mode_row.add_widget(self.date_label)
-        mode_row.add_widget(date_btn)
+        date_group.add_widget(self.date_label)
+        date_group.add_widget(date_btn)
+        mode_row.add_widget(date_group)
         box.add_widget(mode_row)
         self._set_mode(self.mode)
 

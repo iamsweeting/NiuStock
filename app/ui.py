@@ -308,9 +308,11 @@ class NiumenApp(MDApp):
 
     def _switch_to(self, name):
         """切换页面：同步 ScreenManager 与底栏高亮；
-        大盘页自动刷新（TTL 冷却）；枢轴点默认代码与牛门线同步。"""
+        大盘页自动刷新（TTL 冷却）；枢轴点默认代码与牛门线同步。
+        每次切换兜底移除启动状态标签（防止"牛票启动中…"残留）。"""
         if name == self.sm.current:
             return
+        self._remove_status_label()
         self.sm.current = name
         self._select_tab(name)
         try:
@@ -449,12 +451,7 @@ class NiumenApp(MDApp):
             pass
 
     def _remove_status_label(self):
-        try:
-            from kivy.core.window import Window
-            if diag._status_label is not None and diag._status_label.parent is not None:
-                Window.remove_widget(diag._status_label)
-        except Exception:  # noqa: BLE001
-            pass
+        diag.remove_status_label()
 
     def _start_watchdog(self):
         """每 10 秒记录一次事件循环存活。"""
