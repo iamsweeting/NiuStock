@@ -66,7 +66,7 @@ DEFAULT_WATCHLIST = [
     {"code": "sh513310", "name": "中韩半导体ETF"},
     {"code": "sz159845", "name": "中证1000ETF"},
 ]
-WATCHLIST_LIMIT = 20       # 查询名单上限（需求确认）
+WATCHLIST_LIMIT = 10       # 查询名单上限（近期查询显示 10 条）
 
 # 牛门线默认查询代码（首屏自动加载第一个快捷标的）
 DEFAULT_CODE = DEFAULT_WATCHLIST[0]["code"]

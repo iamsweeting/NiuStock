@@ -220,12 +220,18 @@ class PivotPage:
         vrow = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(30), spacing=dp(8),
         )
+        # 需求：字体不宜过大，数字大时不换行（text_size 限制单行，避免覆盖上方文字）
         self.v_high = MDLabel(text="最高 —", size_hint_x=1, adaptive_height=True,
-                              theme_text_color="Custom", text_color=_RED, valign="middle")
+                              theme_text_color="Custom", text_color=_RED, valign="middle",
+                              font_size=dp(12))
         self.v_low = MDLabel(text="最低 —", size_hint_x=1, adaptive_height=True,
-                             theme_text_color="Custom", text_color=_GREEN, valign="middle")
+                             theme_text_color="Custom", text_color=_GREEN, valign="middle",
+                             font_size=dp(12))
         self.v_close = MDLabel(text="收盘 —", size_hint_x=1, adaptive_height=True,
-                               theme_text_color="Custom", text_color=(1, 1, 1, 1), valign="middle")
+                               theme_text_color="Custom", text_color=(1, 1, 1, 1), valign="middle",
+                               font_size=dp(12))
+        for _lb in (self.v_high, self.v_low, self.v_close):
+            _lb.bind(size=lambda o, *a: setattr(o, "text_size", (o.width, None)))
         vrow.add_widget(self.v_high)
         vrow.add_widget(self.v_low)
         vrow.add_widget(self.v_close)

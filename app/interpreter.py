@@ -99,57 +99,38 @@ def interpret(bar, version):
     advice, advice_color = _advice_for(score, c, qrl, nml, smx,
                                        cbx20, cbx60, has_cost)
 
-    # ---- 关键位清单 ----
+    # ---- 关键位（精简：只列最重要的压力/支撑）----
     levels = []
     if nml is not None:
         if c < nml:
-            levels.append(("压力", "NML 牛门线", nml, "距突破 %.1f%%" % abs(_pct_above(c, nml))))
+            levels.append(("压力", "NML", nml, "距 %.1f%%" % abs(_pct_above(c, nml))))
         else:
-            levels.append(("突破", "NML 牛门线", nml, "已站上，上看 QRL"))
+            levels.append(("支撑", "NML", nml, "已站上"))
     if qrl is not None and nml is not None and c >= nml:
-        levels.append(("压力", "QRL 强阻力线", qrl, "上方空间"))
+        levels.append(("压力", "QRL", qrl, "上方空间"))
     if smx is not None:
-        levels.append(("支撑", "SMX 生命线", smx, "上方运行" if c >= smx else "下方运行"))
-    if has_cost:
-        if cbx20 is not None:
-            levels.append(("支撑", "CBX20 短期成本", cbx20, "上方" if c >= cbx20 else "下方"))
-        if cbx60 is not None:
-            levels.append(("支撑", "CBX60 中期成本", cbx60, "上方" if c >= cbx60 else "下方"))
-    if has_cost and cbx60 is not None and nml is not None and c < nml and c >= cbx60:
-        levels.append(("提示", "回踩观察位", cbx60, "若回踩不破，是较好的加仓观察位"))
+        levels.append(("支撑", "SMX", smx, "上方" if c >= smx else "下方"))
+    if has_cost and cbx60 is not None and cbx20 is not None and c >= cbx60 and c < cbx20:
+        levels.append(("提示", "CBX20", cbx20, "短期压力"))
 
-    # ---- 概述段落（只讲相对位置与线序，不再引用各线数值）----
-    parts = []
-    # 1) 收盘价相对各线的位置（数值无关）
+    # ---- 概述（1-2 行，只讲相对位置，不再引用各线数值）----
     if qrl is not None and c >= qrl:
-        parts.append("收盘已站上强阻力线，处于强势区")
+        pos_line = "收盘站上强阻力线，强势区"
     elif nml is not None and c >= nml:
-        parts.append("收盘位于牛门线与强阻力线之间，突破确认区")
+        pos_line = "收盘在牛门线与强阻力线之间，突破确认区"
     elif smx is not None and c >= smx:
-        parts.append("收盘位于生命线上方、牛门线下方，待突破区")
+        pos_line = "收盘在生命线上方、牛门线下方，待突破"
     elif smx is not None:
-        parts.append("收盘跌破生命线，弱势区")
-    # 2) 成本线关系
-    if has_cost:
-        parts.append("短期成本提供支撑" if (cbx20 is not None and c >= cbx20) else "短期成本承压")
-        parts.append("中期成本已收复" if (cbx60 is not None and c >= cbx60) else "中期成本尚未收复")
+        pos_line = "收盘跌破生命线，弱势区"
     else:
-        parts.append("均线系统上方运行" if (smx is not None and c >= smx) else "均线系统下方运行")
-    # 3) 五线线序（从高到低；相对位置比数值更重要）
-    order_items = []
-    for k, v in (("QRL", qrl), ("NML", nml), ("SMX", smx),
-                 ("CBX20", cbx20), ("CBX60", cbx60)):
-        if v is not None:
-            order_items.append((k, v))
-    order_items.sort(key=lambda x: x[1], reverse=True)
-    order_str = " > ".join(k for k, _v in order_items)
-    if len(order_items) >= 3:
-        keys = [k for k, _v in order_items]
-        if keys[:3] == ["QRL", "NML", "SMX"]:
-            parts.append("核心线序 QRL>NML>SMX 呈多头排列")
-        else:
-            parts.append("线序 %s" % order_str)
-    summary = "结构%s；阶段：%s。%s。" % (verdict, stage, "；".join(parts))
+        pos_line = ""
+    if has_cost:
+        cost_line = "短期成本%s支撑、中期成本%s" % (
+            "提供" if (cbx20 is not None and c >= cbx20) else "承压",
+            "已收复" if (cbx60 is not None and c >= cbx60) else "未收复")
+    else:
+        cost_line = "均线%s运行" % ("上方" if (smx is not None and c >= smx) else "下方")
+    summary = "%s；%s" % (pos_line, cost_line) if pos_line else cost_line
 
     return {
         "verdict": verdict,

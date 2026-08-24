@@ -222,25 +222,22 @@ def test_merge_section_live_and_hist():
     market._merge_section(out, "hist_turnover", {
         "turnover": [("2026-08-21", 8823.0)], "errors": [],
     })
-    market._merge_section(out, "hist_kr", {
-        "kr": {"三星电子": [("08-21", 86000.0)]}, "errors": [],
-    })
     assert len(out["live"]["quotes"]) == 1
     assert out["live"]["turnover_yi"] == 8823.0
     assert out["history"]["turnover"] == [("2026-08-21", 8823.0)]
-    assert out["history"]["kr"]["三星电子"] == [("08-21", 86000.0)]
     assert out["sources"].get("新浪") is True
 
 
 def test_merge_section_errors_routed():
     out = market._new_state()
-    market._merge_section(out, "live_yahoo", {"quotes": [], "errors": ["Yahoo挂了"]})
+    market._merge_section(out, "live_median", {
+        "csi300_median": 21.5, "errors": ["成分页挂了"]})
     market._merge_section(out, "hist_ccpr", {"ccpr": [], "errors": ["货币网挂了"]})
-    assert "Yahoo挂了" in out["live"]["errors"]
+    assert "成分页挂了" in out["live"]["errors"]
     assert "货币网挂了" in out["history"]["errors"]
 
 
 def test_new_state_shape():
     out = market._new_state()
     assert out["live"]["quotes"] == [] and out["live"]["errors"] == []
-    assert out["history"]["turnover"] == [] and out["history"]["kr"] == {}
+    assert out["history"]["turnover"] == [] and "kr" not in out["history"]

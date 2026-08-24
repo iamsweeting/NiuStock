@@ -36,7 +36,9 @@ SINA_HS300 = ("https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.
               "Market_Center.getHQNodeData")
 SINA_GLOBAL_KLINE = ("https://stock2.finance.sina.com.cn/futures/api/jsonp.php/"
                      "var%20_=/GlobalFuturesService.getGlobalFuturesDailyKLine")
-YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/"
+# 新浪 A股日K（scale=240 日线；volume 字段为成交额(元)）——成交额历史兜底源
+SINA_CN_KLINE = ("https://quotes.sina.cn/cn/api/json_v2.php/"
+                 "CN_MarketDataService.getKLineData")
 CHINAMONEY_CCPR = "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-ccpr/CcprHisNew"
 EM_KLINE = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 # 乐咕乐股：沪深300市盈率(TTM)中位数（用户指定数据源）
@@ -54,17 +56,9 @@ SINA_LIVE_CODES = [
     ("hf_XAU", "伦敦金", "gold"),
     ("nf_AU0", "沪金", "fut"),
 ]
-# 本日实时：Yahoo 代码（韩国KOSPI / 日经）
-YAHOO_LIVE = [
-    ("^KS11", "韩国KOSPI"),
-    ("^N225", "日经225"),
-]
 
-# 历史：Yahoo 代码（仅保留无其他免费源的：韩国KOSPI/日经/韩国半导体）
-YAHOO_HISTORY = [
-    ("005930.KS", "三星电子", "krw"),
-    ("000660.KS", "SK海力士", "krw"),
-]
+# 历史：韩国KOSPI/日经/韩国半导体依赖 Yahoo，手机网络不可达（429/超时），
+# 按需求删除（免费源查不到即去掉），不再请求。
 
 TOTAL_TRADE_MINUTES = 240.0          # 9:30-11:30 + 13:00-15:00
 SESSION_START = (9, 30)
@@ -359,29 +353,6 @@ def _sec_live_sina():
     return data
 
 
-def _sec_live_yahoo():
-    """实时②：韩国KOSPI / 日经225（Yahoo，限流退避）。"""
-    sess = _session()
-    data = {"quotes": [], "errors": []}
-    last = time.monotonic()
-    for code, label in YAHOO_LIVE:
-        last = _pacing(last, 1.5)
-        try:
-            text = _get_text(sess, YAHOO_CHART + code,
-                             params={"range": "5d", "interval": "1d"},
-                             tries=3, pause=1.2)
-            price, _hist = parse_yahoo_chart(text)
-            pct = 0.0
-            if len(_hist) >= 2:
-                pct = (_hist[-1][1] - _hist[-2][1]) / _hist[-2][1] * 100.0
-            data["quotes"].append(
-                {"name": label, "price": price, "pct": pct, "src": "Yahoo"})
-            data["sources"] = {"Yahoo": True}
-        except Exception as e:  # noqa: BLE001
-            data["errors"].append("%s：%s" % (label, e))
-    return data
-
-
 def _sec_live_median():
     """实时③：沪深300中位数（新浪成分 3 页）+ 乐咕乐股中位数PE(TTM)。"""
     sess = _session()
@@ -411,8 +382,24 @@ def _sec_live_median():
     return data
 
 
+def _sina_cn_kline(symbol, n=8):
+    """新浪 A股日K（scale=240）：返回 [(date, amount_yuan)]，volume 字段为成交额(元)。"""
+    sess = _session()
+    url = SINA_CN_KLINE + "?symbol=%s&scale=240&ma=no&datalen=%d" % (symbol, n)
+    text = _get_text(sess, url, headers={"Referer": "https://finance.sina.com.cn/"})
+    import json
+    arr = json.loads(text)
+    out = []
+    for r in arr:
+        d = str(r.get("day", ""))[:10]
+        v = _f(r.get("volume"))
+        if d and v > 0:
+            out.append((d, v))
+    return out
+
+
 def _sec_hist_turnover():
-    """历史①：两市成交额 5 日（东方财富，重试）。"""
+    """历史①：两市成交额 5 日（东方财富 → 新浪日K兜底）。"""
     sess = _session()
     data = {"errors": []}
     try:
@@ -429,10 +416,27 @@ def _sec_hist_turnover():
             for day, _v, amt in parse_em_kline(text):
                 em_days[day] = em_days.get(day, 0.0) + amt
             last = _pacing(last)
-        data["turnover"] = [
-            (day, round(em_days[day] / 1e8, 2)) for day in sorted(em_days)[-5:]]
+        if em_days:
+            data["turnover"] = [
+                (day, round(em_days[day] / 1e8, 2)) for day in sorted(em_days)[-5:]]
+            data["sources"] = {"东方财富": True}
+        else:
+            raise RuntimeError("东方财富无数据")
     except Exception as e:  # noqa: BLE001
-        data["errors"].append("两市成交额历史：%s" % e)
+        data["errors"].append("两市成交额历史(东财)：%s" % e)
+        # 兜底：新浪日K（volume=成交额元），sh000001 + sz399001 合计
+        try:
+            days = {}
+            for sym in ("sh000001", "sz399001"):
+                for d, v in _sina_cn_kline(sym, 8):
+                    days[d] = days.get(d, 0.0) + v
+            if days:
+                data["turnover"] = [
+                    (d, round(days[d] / 1e8, 2)) for d in sorted(days)[-5:]]
+                data["sources"] = {"新浪": True}
+                data["errors"] = []   # 兜底成功则清除错误
+        except Exception as e2:  # noqa: BLE001
+            data["errors"].append("两市成交额历史(新浪)：%s" % e2)
     return data
 
 
@@ -481,38 +485,17 @@ def _sec_hist_wti():
     return data
 
 
-def _sec_hist_kr():
-    """历史④：韩国半导体（三星电子 + SK海力士，Yahoo）。"""
-    sess = _session()
-    data = {"kr": {}, "errors": []}
-    last = time.monotonic()
-    for code, label, unit in YAHOO_HISTORY:
-        last = _pacing(last, 1.5)
-        try:
-            text = _get_text(sess, YAHOO_CHART + code,
-                             params={"range": "5d", "interval": "1d"},
-                             tries=3, pause=1.2)
-            _price, hist = parse_yahoo_chart(text)
-            data["kr"][label] = hist
-            data["sources"] = {"Yahoo": True}
-        except Exception as e:  # noqa: BLE001
-            data["errors"].append("%s：%s" % (label, e))
-    return data
-
-
 _SECTIONS = [
     ("live_sina", _sec_live_sina),
-    ("live_yahoo", _sec_live_yahoo),
     ("live_median", _sec_live_median),
     ("hist_turnover", _sec_hist_turnover),
     ("hist_ccpr", _sec_hist_ccpr),
     ("hist_xau", _sec_hist_xau),
     ("hist_wti", _sec_hist_wti),
-    ("hist_kr", _sec_hist_kr),
 ]
 
-_LIVE_KEYS = {"live_sina", "live_yahoo", "live_median"}
-_HIST_KEYS = {"hist_turnover", "hist_ccpr", "hist_xau", "hist_wti", "hist_kr"}
+_LIVE_KEYS = {"live_sina", "live_median"}
+_HIST_KEYS = {"hist_turnover", "hist_ccpr", "hist_xau", "hist_wti"}
 
 
 def _merge_section(out, key, data):
@@ -525,8 +508,6 @@ def _merge_section(out, key, data):
             live["turnover_yi"] = data["turnover_yi"]
         if data.get("turnover_pred_yi") is not None:
             live["turnover_pred_yi"] = data["turnover_pred_yi"]
-    elif key == "live_yahoo":
-        live["quotes"].extend(data.get("quotes", []))
     elif key == "live_median":
         live["csi300_median"] = data.get("csi300_median")
         live["hs300_median_pe"] = data.get("hs300_median_pe")
@@ -538,8 +519,6 @@ def _merge_section(out, key, data):
         hist["xau"] = data.get("xau", [])
     elif key == "hist_wti":
         hist["wti"] = data.get("wti", [])
-    elif key == "hist_kr":
-        hist["kr"] = data.get("kr", {})
     for e in data.get("errors", []):
         (live["errors"] if key in _LIVE_KEYS else hist["errors"]).append(e)
     for s, v in (data.get("sources") or {}).items():
@@ -552,7 +531,7 @@ def _new_state():
         "live": {"quotes": [], "turnover_yi": None, "turnover_pred_yi": None,
                  "csi300_median": None, "hs300_median_pe": None, "errors": []},
         "history": {"turnover": [], "ccpr": [], "wti": [], "xau": [],
-                    "kr": {}, "errors": []},
+                    "errors": []},
     }
 
 

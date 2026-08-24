@@ -229,5 +229,17 @@ class DateAxis(BoxLayout):
             self._labels.append(lb)
 
     def set_dates(self, dates):
+        """日期标签：第一个带月（07-27），中间只显示日（28 29 30 31），
+        跨月那天带月（08-03），随后只显示日（04 05 06 07）。"""
+        prev_month = None
         for i, lb in enumerate(self._labels):
-            lb.text = dates[i][5:] if i < len(dates) else ""
+            if i >= len(dates):
+                lb.text = ""
+                continue
+            d = dates[i]
+            mm, dd = d[5:7], d[8:10]
+            if i == 0 or mm != prev_month:
+                lb.text = "%s-%s" % (mm, dd)
+            else:
+                lb.text = dd
+            prev_month = mm

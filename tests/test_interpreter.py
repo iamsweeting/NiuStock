@@ -16,8 +16,8 @@ def test_strong_uptrend():
     assert "强势上攻" in res["stage"]
     assert res["flags"]["nml"][0] == "已突破"
     assert res["flags"]["qrl"][0] == "已突破"
-    # 结论不再引用数值，改为线序描述（需求：数值没有相对位置重要）
-    assert "多头排列" in res["summary"]
+    # 结论精简为 1-2 行（不引用数值），强势区描述保留
+    assert "强势区" in res["summary"]
     assert "11.5" not in res["summary"]
 
 
@@ -35,9 +35,8 @@ def test_waiting_breakout_like_doc_example():
         config.VERSION_STOCK,
     )
     assert "底部确认中" in res["stage"]
-    # 回踩观察位提示只保留在 levels，summary 中不再重复
+    # 关键位精简：不再有冗长提示，summary 只 1-2 行
     assert "加仓观察位" not in res["summary"]
-    assert any("回踩" in l[3] for l in res["levels"])
     assert res["verdict"] in ("震荡偏多", "偏多")
 
 

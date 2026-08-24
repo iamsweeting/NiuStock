@@ -81,7 +81,7 @@ class NiumenPage:
             orientation="horizontal", size_hint_y=None, height=dp(58), spacing=dp(8),
         )
         self.input_field = MDTextField(
-            hint_text="输入代码 如 159516 / 600519 / HSTECH",
+            hint_text="输入代码 如 159516 / 600519 / sh000001 / HSTECH",
             size_hint=(1, None), height=dp(56),
         )
         row.add_widget(self.input_field)
@@ -446,14 +446,16 @@ class NiumenPage:
             v = b.get(key)
             if v is None:
                 continue
-            status, scol = res["flags"].get(key, ("—", (0.7, 0.7, 0.7, 1.0)))
-            rows_data.append((v, key, label, col, status, scol))
+            # 需求：状态文字（未突破/逼近/上方…）改为 数值 + 距收盘百分比
+            pct = (close - v) / v * 100.0 if v else 0.0
+            rows_data.append((v, key, label, col, pct))
         rows_data.sort(key=lambda x: x[0], reverse=True)
         rows_html = []
-        for v, key, label, col, status, scol in rows_data:
+        for v, key, label, col, pct in rows_data:
+            dot_col = _hex(config.COLOR_UP) if pct >= 0 else _hex(config.COLOR_DOWN)
             rows_html.append(
-                "[color=%s]%s[/color]  %s   [color=%s]● %s[/color]"
-                % (_hex(col), label, _fmt(v), _hex(scol), status)
+                "[color=%s]%s[/color]  %s   [color=%s]●[/color] %+.1f%%"
+                % (_hex(col), label, _fmt(v), dot_col, pct)
             )
         self.values_label.text = "\n".join(rows_html)
 

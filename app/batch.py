@@ -23,10 +23,10 @@ def truncate_name(name, max_chars=6):
 
 
 def name_display(name, chars_per_line=5, max_lines=2):
-    """返回 (显示文本, 所需行数)。规则：
-      - ≤ chars_per_line：1 行完整显示（过长用省略号？不，1行能放下就直接完整）
+    """返回 (显示文本, 所需行数)。规则（需求）：
+      - ≤ chars_per_line：1 行完整显示
       - ≤ chars_per_line * max_lines：写全名换行（2 行）
-      - 超过：截断为 chars_per_line*max_lines - 1 + "…"
+      - 超过：能放几个字放几个字，直接截断（不用省略号，2 行仍可读）
     """
     name = str(name)
     n = len(name)
@@ -34,7 +34,7 @@ def name_display(name, chars_per_line=5, max_lines=2):
         return name, 1
     if n <= chars_per_line * max_lines:
         return name, 2
-    return name[:chars_per_line * max_lines - 1] + "…", 2
+    return name[:chars_per_line * max_lines], 2
 
 
 def get_name_font_size(name):

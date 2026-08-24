@@ -16,9 +16,9 @@ def test_name_display_two_lines_full():
 
 
 def test_name_display_truncate_beyond_two_lines():
-    # 两行仍放不下 → 截断 + 省略号
+    # 两行仍放不下 → 直接截断到能放下的字数（不用省略号）
     text, lines = batch.name_display("中韩半导体ETF精选增强", chars_per_line=5)
     assert lines == 2
-    assert text.endswith("…")
-    assert len(text) == 5 * 2 - 1 + 1  # 9 字 + …
+    assert text == "中韩半导体ETF精选增强"[:10]
+    assert not text.endswith("…")
 

@@ -82,19 +82,21 @@ class MarketPage:
         )
         box.add_widget(self.quotes_box)
 
-        self.median_card = self._make_card()
-        self.median_label = MDLabel(
-            text="沪深300中位数：—", font_style="Body1", adaptive_height=True,
-        )
-        self.median_card.add_widget(self.median_label)
-        box.add_widget(self.median_card)
-
         # 二、历史
         box.add_widget(self._title("二、历史（近 5 个交易日）"))
         self.hist_box = MDBoxLayout(
             orientation="vertical", spacing=dp(2), adaptive_height=True,
         )
         box.add_widget(self.hist_box)
+
+        # 三、沪深300中位数（置于本页最后）
+        box.add_widget(self._title("三、沪深300中位数"))
+        self.median_card = self._make_card()
+        self.median_label = MDLabel(
+            text="沪深300中位数：—", font_style="Body1", adaptive_height=True,
+        )
+        self.median_card.add_widget(self.median_label)
+        box.add_widget(self.median_card)
 
         self.error_label = MDLabel(
             text="", markup=True, font_style="Caption",
@@ -207,12 +209,6 @@ class MarketPage:
                 self._render_quotes()
             elif key == "live_median":
                 self._render_median(data)
-            elif key == "hist_kr":
-                kr = data.get("kr", {})
-                if kr.get("三星电子"):
-                    self._render_hist_field("kr_三星电子", kr["三星电子"])
-                if kr.get("SK海力士"):
-                    self._render_hist_field("kr_SK海力士", kr["SK海力士"])
             elif key in _SECTION_TO_FIELD:
                 field = _SECTION_TO_FIELD[key]
                 self._render_hist_field(field, data.get(field, []))
@@ -311,16 +307,12 @@ _HIST_TITLES = {
     "ccpr": "美元兑人民币中间价",
     "wti": "WTI原油（美元/桶）",
     "xau": "伦敦金（美元/盎司）",
-    "kr_三星电子": "韩国半导体 · 三星电子（韩元）",
-    "kr_SK海力士": "韩国半导体 · SK海力士（韩元）",
 }
 _HIST_FIELDS = {
     "turnover": "turnover",
     "ccpr": "ccpr",
     "wti": "wti",
     "xau": "xau",
-    "kr_三星电子": "三星电子",
-    "kr_SK海力士": "SK海力士",
 }
 _SECTION_TO_FIELD = {
     "hist_turnover": "turnover",
@@ -333,6 +325,4 @@ _HIST_FMT = {
     "ccpr": lambda v: "%.4f" % v,
     "wti": lambda v: "%.2f" % v,
     "xau": lambda v: "%.2f" % v,
-    "kr_三星电子": lambda v: "%.0f" % v,
-    "kr_SK海力士": lambda v: "%.0f" % v,
 }
