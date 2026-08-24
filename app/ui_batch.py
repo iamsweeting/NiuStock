@@ -79,7 +79,7 @@ class BatchPage:
         box.add_widget(fill_row)
         box.add_widget(MDLabel(
             text="大盘：A股常见指数（含中证A500）+港股+纳斯达克+纽约金+沪金主连\n"
-                 "近期查询：来自本地查询名单（watchlist.json，重启保留；牛门线/枢轴点/批量查询自动记录，大盘预设除外）",
+                 "近期查询：来自本地查询名单（watchlist.json，重启保留；趋势/枢轴点/批量查询自动记录，大盘预设除外）",
             font_style="Caption", theme_text_color="Hint", adaptive_height=True,
         ))
 

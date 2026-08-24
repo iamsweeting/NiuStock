@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""牛门线文字判读（纯函数，便于单元测试）。
+"""趋势判读（纯函数，便于单元测试）。
 
 输出：结构判断（偏多/震荡偏多/震荡偏空/偏空）、阶段描述、概述段落、关键位清单。
+指标命名：YL 压力线（原NML）、QL 止盈线（原QRL）、ZS 止损线（原SMX）。
 """
 from . import config
 
@@ -69,9 +70,9 @@ def interpret(bar, version):
     elif has_cost and cbx60 is not None and c < cbx60 and smx is not None and c >= smx:
         stage = "中期成本下方，以反弹对待"
     elif smx is not None and c >= smx:
-        stage = "均线上方运行，等待突破"
+        stage = "止损线上方运行，等待突破"
     else:
-        stage = "跌破生命线，短期趋势走弱"
+        stage = "跌破止损线，短期趋势走弱"
 
     # ---- 综合得分与结构判断 ----
     score = 0
@@ -103,25 +104,25 @@ def interpret(bar, version):
     levels = []
     if nml is not None:
         if c < nml:
-            levels.append(("压力", "NML", nml, "距 %.1f%%" % abs(_pct_above(c, nml))))
+            levels.append(("压力", "YL 压力线", nml, "距 %.1f%%" % abs(_pct_above(c, nml))))
         else:
-            levels.append(("支撑", "NML", nml, "已站上"))
+            levels.append(("支撑", "YL 压力线", nml, "已站上"))
     if qrl is not None and nml is not None and c >= nml:
-        levels.append(("压力", "QRL", qrl, "上方空间"))
+        levels.append(("压力", "QL 止盈线", qrl, "上方空间"))
     if smx is not None:
-        levels.append(("支撑", "SMX", smx, "上方" if c >= smx else "下方"))
+        levels.append(("支撑", "ZS 止损线", smx, "上方" if c >= smx else "下方"))
     if has_cost and cbx60 is not None and cbx20 is not None and c >= cbx60 and c < cbx20:
         levels.append(("提示", "CBX20", cbx20, "短期压力"))
 
     # ---- 概述（1-2 行，只讲相对位置，不再引用各线数值）----
     if qrl is not None and c >= qrl:
-        pos_line = "收盘站上强阻力线，强势区"
+        pos_line = "收盘站上止盈线，强势区"
     elif nml is not None and c >= nml:
-        pos_line = "收盘在牛门线与强阻力线之间，突破确认区"
+        pos_line = "收盘在压力线与止盈线之间，突破确认区"
     elif smx is not None and c >= smx:
-        pos_line = "收盘在生命线上方、牛门线下方，待突破"
+        pos_line = "收盘在止损线上方、压力线下方，待突破"
     elif smx is not None:
-        pos_line = "收盘跌破生命线，弱势区"
+        pos_line = "收盘跌破止损线，弱势区"
     else:
         pos_line = ""
     if has_cost:
@@ -149,10 +150,10 @@ def _advice_for(score, c, qrl, nml, smx, cbx20, cbx60, has_cost):
     """根据结构得分给出买卖参考建议。
 
     规则：
-      - 强势（站上 QRL / 5 分以上）：持股/可低吸，回踩不破加仓
-      - 偏多（站上 NML / 3-4 分）：逢低分批买入，突破 QRL 加仓
+      - 强势（站上 QL 止盈线 / 5 分以上）：持股/可低吸，回踩不破加仓
+      - 偏多（站上 YL 压力线 / 3-4 分）：逢低分批买入，突破 QL 加仓
       - 震荡（2-3 分）：观望为主，等方向明确
-      - 偏空（<2 分或跌破生命线）：反弹减仓/回避，等企稳
+      - 偏空（<2 分或跌破 ZS 止损线）：反弹减仓/回避，等企稳
     """
     if score >= 5:
         return "持股为主，回踩不破可低吸加仓", COLOR_UP

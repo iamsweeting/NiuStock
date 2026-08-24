@@ -2,7 +2,7 @@
 """牛票（Nstock）—— Kivy/KivyMD 移动端外壳。
 
 三大功能页（底部导航切换）：
-  1. 牛门线（ui_niumen.NiumenPage）
+  1. 趋势（ui_niumen.NiumenPage）
   2. 枢轴点（ui_pivot.PivotPage）
   3. 批量枢轴点（ui_batch.BatchPage）
 
@@ -40,7 +40,7 @@ from .watchlist import Watchlist
 # 底部导航标签定义（自定义底栏，替换 KivyMD MDBottomNavigation——
 # 其 1.1.1 + Kivy 2.2.0 组合存在构造崩溃与文字重影问题）
 TAB_DEFS = [
-    ("niumen", "牛门线", "chart-line"),
+    ("niumen", "趋势", "chart-line"),
     ("pivot", "枢轴点", "calculator"),
     ("batch", "批量枢轴", "format-list-bulleted"),
     ("market", "行情", "finance"),

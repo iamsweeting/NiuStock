@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""牛门线指标计算（纯函数，不依赖 Kivy，便于单元测试）。
+"""趋势指标计算（纯函数，不依赖 Kivy，便于单元测试）。
 
 公式（与通达信一致）：
     TR1   = MAX(H-L, ABS(H-REF(C,1)), ABS(L-REF(C,1)))   # 经典真实波幅
     ATRV  = MA(TR1, 14)                                   # 14 周期 ATR（简单均线）
-    NML   = REF(HHV(H,20),1) + 0.5 * ATRV                 # 牛门线
-    QRL   = REF(HHV(H,20),1) + 1.0 * ATRV                 # 强阻力线
-    SMX   = MA(C,10)                                      # 生命线
+    YL    = REF(HHV(H,20),1) + 0.5 * ATRV                 # 压力线（原 NML 牛门线）
+    QL    = REF(HHV(H,20),1) + 1.0 * ATRV                 # 止盈线（原 QRL 强阻力线）
+    ZS    = MA(C,10)                                      # 止损线（原 SMX 生命线）
     CBX20 = SUM(AMOUNT,20)/SUM(V,20)/100                  # 20 日成本（标的版，成交额口径）
     CBX60 = SUM(AMOUNT,60)/SUM(V,60)/100                  # 60 日成本
     指数版成本线改用  SUM(C*V,N)/SUM(V,N)                 # 收盘价×成交量 加权
@@ -55,7 +55,7 @@ def _sum_ratio(numer, denom, window, is_amount):
 
 
 def compute(rows, version):
-    """按时间升序的 K 线列表计算牛门线，返回等长指标列表。
+    """按时间升序的 K 线列表计算趋势指标，返回等长指标列表。
 
     rows 元素：{date, open, high, low, close, volume, amount(可为None)}
     """

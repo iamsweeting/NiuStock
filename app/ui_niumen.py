@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
-"""牛票 · 牛门线页（原牛门线分析界面改造）。
+"""牛票 · 趋势页（原牛门线分析界面改造）。
 
 变化点（对照需求）：
   - 图表窗口 5 → 10 个交易日（config.DISPLAY_POINTS）；
-  - 快捷按钮 = 查询名单前 3 个（watchlist.top(3)），长按删除，底部名单管理卡（删除/清空）；
-  - 仅深色主题（深浅切换按钮移除）；
-  - 顶栏与加载蒙层由 app/ui.py 外壳提供。
+  - 快捷按钮 = 查询名单前 3 个（watchlist.top(3)），长按删除；
+  - 版本按钮可选（基础/标的/指数），自动默认 + 用户可切换；
+  - 指标命名：YL 压力线、QL 止盈线、ZS 止损线；
+  - 仅深色主题；顶栏与加载蒙层由 app/ui.py 外壳提供。
 """
 import threading
 import traceback
@@ -52,7 +53,7 @@ def _fmt(v):
 
 
 class NiumenPage:
-    """牛门线功能页（挂在底部导航第一页的 ScrollView 内）。"""
+    """趋势功能页（挂在底部导航第一页的 ScrollView 内）。"""
 
     def __init__(self, app):
         self.app = app
@@ -94,12 +95,50 @@ class NiumenPage:
         row.add_widget(btn)
         box.add_widget(row)
 
+        # 版本选择：基础主图版 / 标的版 / 指数版（需求：自动默认 + 用户可切换）
+        self.version_row = MDBoxLayout(
+            orientation="horizontal", size_hint_y=None, height=dp(40), spacing=dp(8),
+        )
+        self.version_btns = {}
+        for key in (config.VERSION_BASIC, config.VERSION_STOCK, config.VERSION_INDEX):
+            b = MDRaisedButton(
+                text=config.VERSION_NAMES[key], size_hint_x=1,
+                size_hint_y=None, height=dp(34), md_bg_color=CHIP_BG,
+                text_color=(1, 1, 1, 1), font_size=dp(11),
+            )
+            b.elevation = 0
+            b._version = key
+            b.bind(on_release=lambda x: self._set_version(x._version))
+            self.version_row.add_widget(b)
+            self.version_btns[key] = b
+        box.add_widget(self.version_row)
+
         # 快捷按钮：查询名单前 3 个
         self.chips_row = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(40), spacing=dp(8),
         )
         box.add_widget(self.chips_row)
         self._refresh_chips()
+
+    def _set_version(self, version):
+        """用户手动切换版本：重算当前代码的指标并刷新。"""
+        if not self.code:
+            self.app._toast("请先查询代码")
+            return
+        self.version = version
+        self._highlight_version()
+        try:
+            self.bars = indicator.compute(self.rows, self.version)
+            self.sel_idx = len(self.bars) - 1
+            self._update_all()
+        except Exception:  # noqa: BLE001
+            import traceback
+            traceback.print_exc()
+            self.app._toast("切换版本失败")
+
+    def _highlight_version(self):
+        for key, b in self.version_btns.items():
+            b.md_bg_color = get_color_from_hex("#1565c0") if key == self.version else CHIP_BG
 
     def _refresh_chips(self):
         """按查询名单前 3 个重建快捷按钮；长按从名单移除。
@@ -314,6 +353,7 @@ class NiumenPage:
             self.source = res["source"]
             self.stock_name = res["name"] or code
             self.version = api.detect_version(code)
+            self._highlight_version()
             self.bars = indicator.compute(self.rows, self.version)
             self.sel_idx = len(self.bars) - 1
             self._update_all()
@@ -391,16 +431,17 @@ class NiumenPage:
             basis = b.get("cost_basis", "estimate")
             cost_note = "（成交额口径）" if basis == "amount" else "（估算口径）"
         self.name_label.text = "%s  %s" % (self.stock_name or self.code, self.code)
-        self.meta_label.text = "数据源：%s · 版本：%s%s" % (self.source or "—", ver_name, cost_note)
+        self.meta_label.text = "数据源：%s · 版本：%s%s（可切换）" % (
+            self.source or "—", ver_name, cost_note)
         self.date_label.text = "截至交易日：%s" % b["date"]
 
     def _update_chart(self):
         start = max(0, self.sel_idx - (config.DISPLAY_POINTS - 1))
         end = self.sel_idx
         keys = [
-            ("NML", config.COLOR_NML, "nml"),
-            ("QRL", config.COLOR_QRL, "qrl"),
-            ("SMX", config.COLOR_SMX, "smx"),
+            (config.IND_YL, config.COLOR_NML, "nml"),
+            (config.IND_QL, config.COLOR_QRL, "qrl"),
+            (config.IND_ZS, config.COLOR_SMX, "smx"),
         ]
         if self.version != config.VERSION_BASIC:
             keys += [
@@ -431,14 +472,14 @@ class NiumenPage:
 
         res = interpreter.interpret(b, self.version)
         keys = [
-            ("nml", "NML 牛门线", config.COLOR_NML),
-            ("qrl", "QRL 强阻力线", config.COLOR_QRL),
-            ("smx", "SMX 生命线", config.COLOR_SMX),
+            ("nml", config.IND_NAMES["yl"], config.COLOR_NML),
+            ("qrl", config.IND_NAMES["ql"], config.COLOR_QRL),
+            ("smx", config.IND_NAMES["zs"], config.COLOR_SMX),
         ]
         if self.version != config.VERSION_BASIC:
             keys += [
-                ("cbx20", "CBX20 短期成本", config.COLOR_CBX20),
-                ("cbx60", "CBX60 中期成本", config.COLOR_CBX60),
+                ("cbx20", config.IND_NAMES["cbx20"], config.COLOR_CBX20),
+                ("cbx60", config.IND_NAMES["cbx60"], config.COLOR_CBX60),
             ]
         # 按数值从大到小排列（需求 1：上面数值大于下面数值）
         rows_data = []

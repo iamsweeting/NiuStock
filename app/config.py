@@ -2,15 +2,15 @@
 """牛票（Nstock）全局配置与常量。
 
 三大功能：
-  1. 牛门线 —— 唐奇安通道 + ATR 波动率的复合变形指标（原牛门线分析）
+  1. 趋势 —— 压力/止盈/止损线（原牛门线分析，唐奇安通道 + ATR 复合指标）
   2. 枢轴点 —— 五种枢轴算法单股计算（移植自 股票枢轴点 StockPivotCalc）
   3. 批量枢轴点 —— 多代码批量计算（移植自 批量枢轴点 BatchStock）
 
-牛门线公式（与通达信一致）：
-    NML（牛门线）  = REF(HHV(H,20),1) + 0.5 * ATR(14)
-    QRL（强阻力线）= REF(HHV(H,20),1) + 1.0 * ATR(14)
-    SMX（生命线）  = MA(C,10)
-    CBX20/CBX60    = 20/60 日加权平均成本线（仅标的版 / 指数版）
+指标公式（与通达信一致）：
+    YL（压力线）  = REF(HHV(H,20),1) + 0.5 * ATR(14)   （原 NML）
+    QL（止盈线）  = REF(HHV(H,20),1) + 1.0 * ATR(14)   （原 QRL）
+    ZS（止损线）  = MA(C,10)                            （原 SMX）
+    CBX20/CBX60   = 20/60 日加权平均成本线（仅标的版 / 指数版）
 """
 
 KLINE_COUNT = 320          # 拉取的K线根数（覆盖 60 日成本线 + 20 日高点 + 14 日ATR 所需）
@@ -23,10 +23,10 @@ APP_TITLE = "牛票"          # 应用中文名
 APP_NAME_EN = "Nstock"      # 应用英文名
 APP_VERSION = "1.0.0"
 
-# 版本标识（牛门线）
-VERSION_BASIC = "basic"    # 基础主图版（3 线，通用：个股/指数/期货/海外代码均可）
-VERSION_STOCK = "stock"    # 标的版（个股/期货，含成本线 CBX20/CBX60）
-VERSION_INDEX = "index"    # 指数版（大盘指数，含成本线 CBX20/CBX60）
+# 版本标识（趋势页版本可选：自动默认 + 用户可切换）
+VERSION_BASIC = "basic"    # 基础主图版（3 线：YL/QL/ZS，通用：个股/指数/期货/海外代码均可）
+VERSION_STOCK = "stock"    # 标的版（个股/期货，含成本线 CBX20/CBX60，成交额口径 /100）
+VERSION_INDEX = "index"    # 指数版（大盘指数，含成本线 CBX20/CBX60，C*V 加权口径）
 
 VERSION_NAMES = {
     VERSION_BASIC: "基础主图版",
@@ -34,12 +34,24 @@ VERSION_NAMES = {
     VERSION_INDEX: "指数版（成本线）",
 }
 
-# 牛门线参数（与通达信公式保持一致）
+# 指标参数（与通达信公式保持一致）
 N = 20            # 唐奇安通道周期
 M = 14            # ATR 周期
-SMA10 = 10        # 生命线周期
+SMA10 = 10        # 止损线周期
 CBX20_N = 20      # 20 日成本线周期
 CBX60_N = 60      # 60 日成本线周期
+
+# 指标命名（需求：NML→YL 压力线、QRL→QL 止盈线、SMX→ZS 止损线）
+IND_YL = "YL"     # 压力线（原 NML）
+IND_QL = "QL"     # 止盈线（原 QRL）
+IND_ZS = "ZS"     # 止损线（原 SMX）
+IND_NAMES = {
+    "yl": "YL 压力线",
+    "ql": "QL 止盈线",
+    "zs": "ZS 止损线",
+    "cbx20": "CBX20 短期成本",
+    "cbx60": "CBX60 中期成本",
+}
 
 # 图表配色（RGBA，Kivy 0~1）—— 与同花顺/通达信默认均线配色一致：
 #   NML 白（同 MA5）、QRL 红、SMX 黄（同 MA10）、CBX20 紫（同 MA20）、CBX60 深绿（同 MA60）
