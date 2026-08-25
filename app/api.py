@@ -253,23 +253,31 @@ def _get(sess, url, **kw):
 
 def _fetch_tencent(code):
     """腾讯 K 线：优先新版接口（含成交额，供标的版成本线使用），
-    失败（英文代码/期货等无覆盖）自动回退旧版接口。"""
+    失败（英文代码/期货等无覆盖）自动回退旧版接口。
+
+    英文代码（hstech/hsi 等）腾讯要求带 hk 前缀，裸代码返回空：
+    先按原样试，失败再试 hk+code。
+    """
     sess = _session()
-    params = {"param": "%s,day,,,%d,qfq" % (code, config.KLINE_COUNT)}
+    candidates = [code]
+    if re.fullmatch(r"[a-z]{2,}", code):
+        candidates.append("hk" + code)
     last_err = None
-    for url in (TENCENT_KLINE_NEW, TENCENT_KLINE):
-        try:
-            r = _get(sess, url, params=params)
-            r.raise_for_status()
-            parsed = parse_tencent(r.text)
-            if parsed["rows"]:
-                name = parsed["name"]
-                if not name:
-                    name = _fetch_tencent_quote_name(code, sess)
-                return parsed["rows"], name, "腾讯"
-            last_err = ValueError("接口未返回K线数据")
-        except Exception as e:  # noqa: BLE001
-            last_err = e
+    for cand in candidates:
+        params = {"param": "%s,day,,,%d,qfq" % (cand, config.KLINE_COUNT)}
+        for url in (TENCENT_KLINE_NEW, TENCENT_KLINE):
+            try:
+                r = _get(sess, url, params=params)
+                r.raise_for_status()
+                parsed = parse_tencent(r.text)
+                if parsed["rows"]:
+                    name = parsed["name"]
+                    if not name:
+                        name = _fetch_tencent_quote_name(cand, sess)
+                    return parsed["rows"], name, "腾讯"
+                last_err = ValueError("接口未返回K线数据")
+            except Exception as e:  # noqa: BLE001
+                last_err = e
     raise last_err
 
 
