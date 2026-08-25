@@ -4,18 +4,17 @@
 需求：
 一、本日实时（页面切换前自动刷新，不做高频轮询，避免触发反爬）
   1. A股成交总金额（沪深两市）、本日预测额（按已交易时长线性外推）
-  2. 上证 / 中证1000 / 沪深300 / 恒生 / 恒生科技 / 伦敦金 / 沪金 / 韩国KOSPI / 日经
+  2. 上证 / 中证A500 / 中证1000 / 沪深300 / 深证成指 / 恒生 / 恒生科技 / 伦敦金 / 沪金
   3. 沪深300成分股价格中位数
 二、历史（近 5 个交易日）
-  1. A股成交总金额  2. 美元兑人民币中间价  3. WTI原油  4. 伦敦金  5. 韩国半导体(三星电子+SK海力士)
+  1. A股成交总金额  2. 美元兑人民币中间价  3. WTI原油  4. 伦敦金
 
 数据源（低请求量、批量合并、请求间隔节流）：
   - 新浪 hq.sinajs.cn：A股/港股指数、伦敦金、沪金 —— 1 个批量请求
   - 新浪成分股接口：沪深300成分价格（3 页）
   - 新浪国际期货日K：伦敦金历史
-  - Yahoo chart：日经/韩国KOSPI/WTI/韩国半导体
   - 中国货币网 chinamoney：美元中间价
-  - 东方财富 push2his：两市成交额历史（带重试；失败则该小节显示占位）
+  - 腾讯 day/query：两市成交额历史（当日分时末条累计成交额；东方财富 push2his 兜底）
 所有解析函数为纯函数，便于单元测试（不访问网络）。
 """
 import re
@@ -36,11 +35,10 @@ SINA_HS300 = ("https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.
               "Market_Center.getHQNodeData")
 SINA_GLOBAL_KLINE = ("https://stock2.finance.sina.com.cn/futures/api/jsonp.php/"
                      "var%20_=/GlobalFuturesService.getGlobalFuturesDailyKLine")
-# 新浪 A股日K（scale=240 日线；volume 字段为成交额(元)）——成交额历史兜底源
-SINA_CN_KLINE = ("https://quotes.sina.cn/cn/api/json_v2.php/"
-                 "CN_MarketDataService.getKLineData")
 CHINAMONEY_CCPR = "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-ccpr/CcprHisNew"
 EM_KLINE = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+# 腾讯当日分时（day/query）：每交易日末累计成交额(元)，含指数/ETF/个股 —— 两市成交额历史主源
+TX_DAY_QUERY = "https://web.ifzq.gtimg.cn/appstock/app/day/query"
 # 乐咕乐股：沪深300市盈率(TTM)中位数（用户指定数据源）
 LEGULEGU_HS300 = "https://legulegu.com/stockdata/hs300-ttm-lyr"
 
@@ -382,61 +380,73 @@ def _sec_live_median():
     return data
 
 
-def _sina_cn_kline(symbol, n=8):
-    """新浪 A股日K（scale=240）：返回 [(date, amount_yuan)]，volume 字段为成交额(元)。"""
+def _tx_day_query_amount(symbol, n=5):
+    """腾讯 day/query：返回 [(date, amount_yuan)]，最近 n 个交易日（升序）。
+
+    每交易日分时最后一条的累计成交额即当日成交额(元)，对指数/ETF/个股均有效。
+    """
     sess = _session()
-    url = SINA_CN_KLINE + "?symbol=%s&scale=240&ma=no&datalen=%d" % (symbol, n)
-    text = _get_text(sess, url, headers={"Referer": "https://finance.sina.com.cn/"})
+    url = TX_DAY_QUERY + "?code=" + symbol
+    text = _get_text(sess, url, tries=2, pause=1.0)
     import json
-    arr = json.loads(text)
+    data = json.loads(text)
+    blk = data["data"][symbol]
     out = []
-    for r in arr:
-        d = str(r.get("day", ""))[:10]
-        v = _f(r.get("volume"))
-        if d and v > 0:
-            out.append((d, v))
-    return out
+    for day in blk.get("data", []):
+        d = str(day.get("date", ""))
+        recs = day.get("data") or []
+        if not recs:
+            continue
+        last = recs[-1].split()
+        if len(last) >= 4:   # "1500 3894.42 572191213 1218107974056.10"
+            out.append(("%s-%s-%s" % (d[:4], d[4:6], d[6:8]), float(last[3])))
+    return out[-n:]
 
 
 def _sec_hist_turnover():
-    """历史①：两市成交额 5 日（东方财富 → 新浪日K兜底）。"""
+    """历史①：两市成交额 5 日（腾讯 day/query 主 → 东方财富兜底）。
+
+    实测（2026-08-24）：上证 9520亿 + 深证 10554亿 ≈ 2.0万亿，与实时口径一致。
+    """
     sess = _session()
     data = {"errors": []}
     try:
-        em_days = {}
+        days = {}
         last = time.monotonic()
-        for secid in ("1.000001", "0.399001"):
-            text = _get_text(sess, EM_KLINE, params={
-                "secid": secid, "fields1": "f1,f2,f3",
-                "fields2": "f51,f52,f53,f54,f55,f56,f57",
-                "klt": 101, "fqt": 1,
-                "beg": (_cn_now() - timedelta(days=10)).strftime("%Y%m%d"),
-                "end": (_cn_now() + timedelta(days=1)).strftime("%Y%m%d")},
-                tries=3, pause=1.0)
-            for day, _v, amt in parse_em_kline(text):
-                em_days[day] = em_days.get(day, 0.0) + amt
+        for sym in ("sh000001", "sz399001"):
+            for d, amt in _tx_day_query_amount(sym, 5):
+                days[d] = days.get(d, 0.0) + amt
             last = _pacing(last)
-        if em_days:
+        if days:
             data["turnover"] = [
-                (day, round(em_days[day] / 1e8, 2)) for day in sorted(em_days)[-5:]]
-            data["sources"] = {"东方财富": True}
+                (d, round(days[d] / 1e8, 2)) for d in sorted(days)[-5:]]
+            data["sources"] = {"腾讯": True}
         else:
-            raise RuntimeError("东方财富无数据")
+            raise RuntimeError("腾讯无数据")
     except Exception as e:  # noqa: BLE001
-        data["errors"].append("两市成交额历史(东财)：%s" % e)
-        # 兜底：新浪日K（volume=成交额元），sh000001 + sz399001 合计
+        data["errors"].append("两市成交额历史(腾讯)：%s" % e)
+        # 兜底：东方财富 push2his（sh000001 + sz399001 日K 成交额合计）
         try:
-            days = {}
-            for sym in ("sh000001", "sz399001"):
-                for d, v in _sina_cn_kline(sym, 8):
-                    days[d] = days.get(d, 0.0) + v
-            if days:
+            em_days = {}
+            last = time.monotonic()
+            for secid in ("1.000001", "0.399001"):
+                text = _get_text(sess, EM_KLINE, params={
+                    "secid": secid, "fields1": "f1,f2,f3",
+                    "fields2": "f51,f52,f53,f54,f55,f56,f57",
+                    "klt": 101, "fqt": 1,
+                    "beg": (_cn_now() - timedelta(days=10)).strftime("%Y%m%d"),
+                    "end": (_cn_now() + timedelta(days=1)).strftime("%Y%m%d")},
+                    tries=3, pause=1.0)
+                for day, _v, amt in parse_em_kline(text):
+                    em_days[day] = em_days.get(day, 0.0) + amt
+                last = _pacing(last)
+            if em_days:
                 data["turnover"] = [
-                    (d, round(days[d] / 1e8, 2)) for d in sorted(days)[-5:]]
-                data["sources"] = {"新浪": True}
+                    (day, round(em_days[day] / 1e8, 2)) for day in sorted(em_days)[-5:]]
+                data["sources"] = {"东方财富": True}
                 data["errors"] = []   # 兜底成功则清除错误
         except Exception as e2:  # noqa: BLE001
-            data["errors"].append("两市成交额历史(新浪)：%s" % e2)
+            data["errors"].append("两市成交额历史(东财)：%s" % e2)
     return data
 
 

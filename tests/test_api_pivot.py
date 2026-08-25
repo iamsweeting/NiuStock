@@ -70,18 +70,18 @@ def test_aggregate_daily_no_data_returns_none():
 
 
 # --------------------------------------------------------------------------
-# 按周聚合
+# 按周聚合（计算日 = 目标日倒推 5 个交易日；验证周 = 下一交易日起滚动一周）
 # --------------------------------------------------------------------------
 
 def test_aggregate_weekly():
     # 构造跨周末的两周数据：1/5(一)~1/9(五)，1/12(一)~1/16(五)
     days = _weekdays(date(2026, 1, 5), 10)
     rows = _rows(days)
-    # 目标=周四 1/8：计算周=其所在自然周 1/5~1/9
+    # 目标=周四 1/8：计算日 = 1/8 往前数 5 个交易日 = 1/2,1/5,1/6,1/7,1/8
     target = days[3]
     res = api.aggregate_pivot(rows, target, weekly=True)
-    assert res["calc_date"].startswith(days[0].strftime("%m-%d"))  # 周一 1/5
-    assert res["calc_date"].endswith(days[4].strftime("%m-%d"))    # 周五 1/9
+    assert res["calc_date"].startswith(days[0].strftime("%m-%d"))  # 1/5
+    assert res["calc_date"].endswith(days[3].strftime("%m-%d"))    # 1/8
     assert res["high"] == 11.0 and res["low"] == 9.0
     assert res["verify_mode"] == "next_week"
     # 验证周 = 目标日下一交易日起一周（滚动窗口）：1/9 起，含 1/12~1/15
@@ -89,16 +89,27 @@ def test_aggregate_weekly():
     assert res["verify_date"].endswith(days[8].strftime("%m-%d"))    # 1/15（1/8+7天）
 
 
-def test_aggregate_weekly_midweek_target_uses_calendar_week():
-    # 目标=周三：计算周仍是所在自然周（周一~周五），验证周=下一交易日起滚动一周
+def test_aggregate_weekly_five_trading_days_from_target():
+    # 目标=周五 1/9：计算日 = 1/9 往前 5 个交易日 = 1/5~1/9（跨周末）
     days = _weekdays(date(2026, 1, 5), 10)
     rows = _rows(days)
-    target = days[2]  # 1/7 周三
+    target = days[4]  # 1/9 周五
     res = api.aggregate_pivot(rows, target, weekly=True)
     assert res["calc_date"].startswith(days[0].strftime("%m-%d"))  # 1/5
     assert res["calc_date"].endswith(days[4].strftime("%m-%d"))    # 1/9
     assert res["verify_mode"] == "next_week"
-    assert res["verify_date"].startswith(days[3].strftime("%m-%d"))  # 1/8（目标日次日）
+    assert res["verify_date"].startswith(days[5].strftime("%m-%d"))  # 1/12（目标日次日）
+
+
+def test_aggregate_weekly_fewer_than_five_days():
+    # 数据不足 5 个交易日：按实际天数（1/5~1/7 共 3 天）；无后续交易日 → 验证取最新
+    days = _weekdays(date(2026, 1, 5), 3)
+    rows = _rows(days)
+    target = days[2]  # 1/7 周三
+    res = api.aggregate_pivot(rows, target, weekly=True)
+    assert res["calc_date"].startswith(days[0].strftime("%m-%d"))  # 1/5
+    assert res["calc_date"].endswith(days[2].strftime("%m-%d"))    # 1/7
+    assert res["verify_mode"] == "latest"
 
 
 def test_aggregate_weekly_next_week_partial_counts():

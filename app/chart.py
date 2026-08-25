@@ -212,12 +212,19 @@ class VolumePanel(Widget):
 
 
 class DateAxis(BoxLayout):
-    """DISPLAY_POINTS 个交易日的日期标签（MM-DD）。"""
+    """DISPLAY_POINTS 个交易日的日期标签（MM-DD）。
+
+    左内边距与主图/成交额柱的 pad_l 一致（dp(8)+dp(56)），
+    使日期标签对齐在成交额柱正下方（需求：日期放到成交额柱下面，不偏左）。
+    """
+
+    _PAD_L = dp(8) + dp(56)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.size_hint_y = None
         self.height = dp(18)
+        self.padding = [self._PAD_L, 0, dp(8), 0]   # [左, 上, 右, 下]
         self._labels = []
         for _ in range(config.DISPLAY_POINTS):
             lb = Label(

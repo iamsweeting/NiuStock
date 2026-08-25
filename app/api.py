@@ -31,6 +31,9 @@ UA = ("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36")
 
 TENCENT_KLINE = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+# 新版腾讯 K 线：第 8 个字段为当日成交额(万元)，股票/ETF/指数/港股均含；
+# 旧版 fqkline 不返回成交额（标的版成本线只能退化为估算口径）。
+TENCENT_KLINE_NEW = "https://web.ifzq.gtimg.cn/appstock/app/newfqkline/get"
 SINA_KLINE = "https://quotes.sina.cn/cn/api/jsonp_v2.php/var%20_=/CN_MarketDataService.getKLineData"
 TENCENT_QUOTE = "https://qt.gtimg.cn/q="
 
@@ -93,7 +96,7 @@ def _normalize_date(d):
 
 
 def _rows_to_dicts(rows, o, c, h, l, v):
-    """将腾讯 K 线行转成 dict 列表；row[6] 若存在且合理则视为当日成交额(元)。"""
+    """将腾讯 K 线行转成 dict 列表；解析成交额（newfqkline 第 8 字段=万元，旧版第 6 字段=元）。"""
     out = []
     for row in rows:
         try:
@@ -107,7 +110,18 @@ def _rows_to_dicts(rows, o, c, h, l, v):
         except (IndexError, TypeError, ValueError):
             continue
         amount = None
-        if len(row) > 6:
+        # newfqkline 格式：第 8 字段为当日成交额(万元)（含指数/ETF/港股）。
+        # 数量级对照：成交额(元)≈价×量(手)×100，故 万元 ≈ 价×量/100；
+        # 用宽松下限（volume/10000 万元）排除异常小值，避免误伤低价 ETF。
+        if len(row) > 8:
+            try:
+                amt_wan = float(row[8])
+                if amt_wan > volume / 10000.0 and amt_wan > 0:
+                    amount = amt_wan * 1e4
+            except (TypeError, ValueError):
+                amount = None
+        # 旧版 fqkline 格式：第 6 字段为当日成交额(元)（部分股票接口返回）
+        if amount is None and len(row) > 6:
             try:
                 amt = float(row[6])
                 # 合理性校验：成交额(元) 应明显大于 成交量(手)
@@ -237,16 +251,25 @@ def _get(sess, url, **kw):
 
 
 def _fetch_tencent(code):
+    """腾讯 K 线：优先新版接口（含成交额，供标的版成本线使用），
+    失败（英文代码/期货等无覆盖）自动回退旧版接口。"""
     sess = _session()
-    url = TENCENT_KLINE
     params = {"param": "%s,day,,,%d,qfq" % (code, config.KLINE_COUNT)}
-    r = _get(sess, url, params=params)
-    r.raise_for_status()
-    parsed = parse_tencent(r.text)
-    name = parsed["name"]
-    if not name:
-        name = _fetch_tencent_quote_name(code, sess)
-    return parsed["rows"], name, "腾讯"
+    last_err = None
+    for url in (TENCENT_KLINE_NEW, TENCENT_KLINE):
+        try:
+            r = _get(sess, url, params=params)
+            r.raise_for_status()
+            parsed = parse_tencent(r.text)
+            if parsed["rows"]:
+                name = parsed["name"]
+                if not name:
+                    name = _fetch_tencent_quote_name(code, sess)
+                return parsed["rows"], name, "腾讯"
+            last_err = ValueError("接口未返回K线数据")
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+    raise last_err
 
 
 def _fetch_tencent_quote_name(code, sess=None):
@@ -380,9 +403,9 @@ def aggregate_pivot(rows, target, weekly=False, skip_today=False):
         return None
 
     if weekly:
-        # 计算周：目标日所在自然周（周一~周日）的全部交易日。
-        monday = eff - timedelta(days=eff.weekday())
-        week = [r for d, r in dated if monday <= d < monday + timedelta(days=7)]
+        # 计算周：目标日（含）往前数 5 个交易日（不足 5 个按实际天数），
+        # 而非"所在自然周"（需求确认：从选择日/截止日倒推 5 个交易日）。
+        week = [r for _d, r in upto[-5:]]
         if not week:
             return None
         calc_high = max(r["high"] for r in week)

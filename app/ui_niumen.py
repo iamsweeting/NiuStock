@@ -74,6 +74,8 @@ class NiumenPage:
         self._build_search(box)
         self._build_info_card(box)
         self._build_chart_card(box)
+        # 版本按钮放到图表下方（需求：离图更近，搜索区只留查询+快捷按钮）
+        box.add_widget(self.version_row)
         self._build_values_card(box)
         self._build_judgment_card(box)
 
@@ -95,7 +97,8 @@ class NiumenPage:
         row.add_widget(btn)
         box.add_widget(row)
 
-        # 版本选择：基础主图版 / 标的版 / 指数版（需求：自动默认 + 用户可切换）
+        # 版本选择：基础主图版 / 标的版 / 指数版（需求：自动默认 + 用户可切换）。
+        # 按钮构建在这里，但挂到图表下方（见 build()）。
         self.version_row = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(40), spacing=dp(8),
         )
@@ -111,7 +114,6 @@ class NiumenPage:
             b.bind(on_release=lambda x: self._set_version(x._version))
             self.version_row.add_widget(b)
             self.version_btns[key] = b
-        box.add_widget(self.version_row)
 
         # 快捷按钮：查询名单前 3 个
         self.chips_row = MDBoxLayout(
@@ -218,12 +220,7 @@ class NiumenPage:
         )
         self.info_card.bind(minimum_height=self.info_card.setter("height"))
         self.name_label = MDLabel(text="—", font_style="H6", adaptive_height=True)
-        self.meta_label = MDLabel(
-            text="—", font_style="Caption",
-            theme_text_color="Secondary", adaptive_height=True,
-        )
         self.info_card.add_widget(self.name_label)
-        self.info_card.add_widget(self.meta_label)
 
         date_row = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(44), spacing=dp(4),
@@ -373,7 +370,7 @@ class NiumenPage:
         self.app.show_loading(False)
         self.app._toast(str(err))
         self.name_label.text = "查询失败：%s" % code
-        self.meta_label.text = str(err)
+        self.name_label.text_color = config.COLOR_DOWN
         self.verdict_label.text = "结构判断：—"
         self.stage_label.text = "阶段：—"
         self.summary_label.text = ""
@@ -425,14 +422,7 @@ class NiumenPage:
 
     def _update_info(self):
         b = self.bars[self.sel_idx]
-        ver_name = config.VERSION_NAMES.get(self.version, self.version)
-        cost_note = ""
-        if self.version != config.VERSION_BASIC:
-            basis = b.get("cost_basis", "estimate")
-            cost_note = "（成交额口径）" if basis == "amount" else "（估算口径）"
         self.name_label.text = "%s  %s" % (self.stock_name or self.code, self.code)
-        self.meta_label.text = "数据源：%s · 版本：%s%s（可切换）" % (
-            self.source or "—", ver_name, cost_note)
         self.date_label.text = "截至交易日：%s" % b["date"]
 
     def _update_chart(self):

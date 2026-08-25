@@ -108,6 +108,17 @@ def test_parse_tencent_amount_field():
     assert res["rows"][1]["amount"] is None
 
 
+def test_parse_tencent_newfqkline_amount_wan():
+    # newfqkline 格式：第 8 字段为当日成交额(万元) → 换算成元（×1e4）
+    payload = _tencent_payload("qfqday", [
+        ["2024-01-02", "100", "102", "103", "99", "1000", {}, "0.2", "999.5", ""],
+        ["2024-01-03", "102", "101", "104", "100", "1200", {}, "0.3", "0.01", ""],  # 过小被忽略
+    ])
+    res = api.parse_tencent(payload)
+    assert res["rows"][0]["amount"] == 999.5 * 1e4   # 万元 → 元
+    assert res["rows"][1]["amount"] is None
+
+
 def test_parse_tencent_bad_response():
     with pytest.raises(Exception):
         api.parse_tencent('{"code": -1}')

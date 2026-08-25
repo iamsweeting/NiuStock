@@ -27,6 +27,7 @@ _GREEN = get_color_from_hex("#66bb6a")
 _WHITE = (1, 1, 1, 1.0)
 _GREY = (0.72, 0.74, 0.78, 1.0)
 _HINT = (0.55, 0.60, 0.68, 1.0)
+_HIST_TITLE_COLOR = get_color_from_hex("#8ab4f8")   # 历史小节标题：浅蓝区分
 _CARD_RADIUS = [dp(12), dp(12), dp(12), dp(12)]
 _ROW_H = 32
 
@@ -184,13 +185,10 @@ class MarketPage:
             ("名称", 0.46), ("最新", 0.30), ("涨跌%", 0.24)]))
         self.quotes_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
 
-        # 历史：六个小节各自「标题 + 占位行」
+        # 历史：四个小节各自「标题 + 占位行」
         self.hist_box.clear_widgets()
         for title in _HIST_TITLES:
-            self.hist_box.add_widget(MDLabel(
-                text=title, font_style="Caption", bold=True,
-                theme_text_color="Custom", text_color=_GREY, adaptive_height=True,
-            ))
+            self.hist_box.add_widget(self._hist_title(title))
             self.hist_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
         self.error_label.text = ""
 
@@ -228,20 +226,20 @@ class MarketPage:
                                  if errs else "")
 
     def _render_turnover(self, live):
-        # 两市成交额 + 本日预测额
+        # 两市成交额（首行）+ 本日预测额（另起一行，需求）
         t = live.get("turnover_yi")
         p = live.get("turnover_pred_yi")
-        parts = []
+        lines = []
         if t:
-            parts.append("两市成交额：[color=%s]%.0f[/color] 亿" % (_hex(_RED), t))
+            lines.append("两市成交额：[color=%s]%.0f[/color] 亿" % (_hex(_RED), t))
         else:
-            parts.append("两市成交额：—")
+            lines.append("两市成交额：—")
         if p:
-            parts.append("本日预测额：[color=%s]%.0f[/color] 亿" % (_hex(_GREEN), p))
-            parts.append("（已交易 %d 分钟外推）" % int(market.elapsed_trade_minutes()))
+            lines.append("本日预测额：[color=%s]%.0f[/color] 亿（已交易 %d 分钟外推）"
+                         % (_hex(_GREEN), p, int(market.elapsed_trade_minutes())))
         elif t:
-            parts.append("本日预测额：—")
-        self.turnover_label.text = "  ·  ".join(parts)
+            lines.append("本日预测额：—")
+        self.turnover_label.text = "\n".join(lines)
 
     def _render_quotes(self, quotes=None):
         # 指数/品种表格：与骨架表头对齐，逐行填充（两小节合并渲染）
@@ -282,11 +280,16 @@ class MarketPage:
             self._hist_section(_HIST_TITLES[fk], fields[fk],
                                fmt=_HIST_FMT[fk])
 
+    def _hist_title(self, text):
+        # 历史小节标题：不小于数值行字号（Body2），浅蓝区分（需求）
+        return MDLabel(
+            text=text, font_style="Body2", bold=True,
+            theme_text_color="Custom", text_color=_HIST_TITLE_COLOR,
+            adaptive_height=True,
+        )
+
     def _hist_section(self, title, rows, fmt):
-        self.hist_box.add_widget(MDLabel(
-            text=title, font_style="Caption", bold=True,
-            theme_text_color="Custom", text_color=_GREY, adaptive_height=True,
-        ))
+        self.hist_box.add_widget(self._hist_title(title))
         if not rows:
             self.hist_box.add_widget(self._row([("暂无数据", _HINT, 1.0)]))
             return
