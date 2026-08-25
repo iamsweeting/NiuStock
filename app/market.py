@@ -320,7 +320,7 @@ def _pacing(prev, gap=0.25):
 # --------------------------------------------------------------------------
 
 def _sec_live_sina():
-    """实时①：新浪批量行情 + 两市成交额 + 本日预测额。"""
+    """实时①：新浪批量行情 + 两市成交额 + 本日预测额（历史分时占比模型）。"""
     sess = _session()
     data = {"quotes": [], "errors": []}
     try:
@@ -343,12 +343,29 @@ def _sec_live_sina():
         if sh and sz:
             total = sh + sz
             data["turnover_yi"] = round(total / 1e8, 2)
-            pred = predict_turnover(total)
+            pred = _predict_turnover_model_or_linear(total)
             data["turnover_pred_yi"] = round(pred / 1e8, 2) if pred else None
         data["sources"] = {"新浪": True}
     except Exception as e:  # noqa: BLE001
         data["errors"].append("新浪行情：%s" % e)
     return data
+
+
+def _predict_turnover_model_or_linear(total):
+    """本日预测成交额：优先历史分时占比模型，失败/过早回退线性外推。
+
+    需求：开盘初期纯线性外推会严重夸大（如 9:47 预测 6 万亿），
+    改用近 5 个交易日分时占比曲线（历史 + 实时动态）。
+    """
+    try:
+        curves = _tx_intraday_curves(5)
+        profile, avg_daily = build_turnover_profile(curves)
+        pred = predict_turnover_model(total, profile, avg_daily)
+        if pred:
+            return pred
+    except Exception:  # noqa: BLE001（模型构建失败 → 回退线性）
+        pass
+    return predict_turnover(total)
 
 
 def _sec_live_median():
@@ -380,11 +397,8 @@ def _sec_live_median():
     return data
 
 
-def _tx_day_query_amount(symbol, n=5):
-    """腾讯 day/query：返回 [(date, amount_yuan)]，最近 n 个交易日（升序）。
-
-    每交易日分时最后一条的累计成交额即当日成交额(元)，对指数/ETF/个股均有效。
-    """
+def _tx_day_query_raw(symbol, n=5):
+    """腾讯 day/query：返回 [(date8, [分钟串...])]，最近 n 个交易日（升序）。"""
     sess = _session()
     url = TX_DAY_QUERY + "?code=" + symbol
     text = _get_text(sess, url, tries=2, pause=1.0)
@@ -395,12 +409,129 @@ def _tx_day_query_amount(symbol, n=5):
     for day in blk.get("data", []):
         d = str(day.get("date", ""))
         recs = day.get("data") or []
-        if not recs:
-            continue
-        last = recs[-1].split()
-        if len(last) >= 4:   # "1500 3894.42 572191213 1218107974056.10"
-            out.append(("%s-%s-%s" % (d[:4], d[4:6], d[6:8]), float(last[3])))
+        if recs:
+            out.append((d, recs))
     return out[-n:]
+
+
+def _tx_day_query_amount(symbol, n=5):
+    """腾讯 day/query：返回 [(date, amount_yuan)]，最近 n 个交易日（升序）。
+
+    每交易日分时最后一条的累计成交额即当日成交额(元)，对指数/ETF/个股均有效。
+    """
+    out = []
+    for d, recs in _tx_day_query_raw(symbol, n):
+        last = recs[-1].split()
+        if len(last) >= 4:
+            out.append(("%s-%s-%s" % (d[:4], d[4:6], d[6:8]), float(last[3])))
+    return out
+
+
+def _minute_elapsed(hhmm):
+    """HHMM → 距 9:30 的已交易分钟数（剔除午休；如 0930→0，1130→120，1500→240）。"""
+    t = (hhmm // 100) * 60 + (hhmm % 100)
+    if t <= 11 * 60 + 30:
+        return t - (9 * 60 + 30)
+    if t >= 13 * 60:
+        return 120 + t - (13 * 60)
+    return 120
+
+
+def _tx_intraday_curves(n=5):
+    """沪深两市各交易日分时累计成交额曲线（两市逐分钟求和）。
+
+    返回 {date8: [(elapsed_min, 两市累计成交额(元)), ...]}（升序），
+    用于构建"当日已完成占比"预测模型；剔除当日未完成的今天。
+    注意：腾讯分时含午休回显（1300 与 1130 累计相同），同分钟只取一次。
+    """
+    sess = _session()
+    per_sym = {}   # sym -> {date8: {elapsed: cum}}
+    today = _cn_now().strftime("%Y%m%d")
+    last = time.monotonic()
+    for sym in ("sh000001", "sz399001"):
+        m = {}
+        for d, recs in _tx_day_query_raw(sym, n):
+            if d >= today:
+                continue
+            dd = m.setdefault(d, {})
+            for r in recs:
+                parts = r.split()
+                if len(parts) >= 4:
+                    el = _minute_elapsed(int(parts[0][:4]))
+                    # 同分钟重复（午休回显等）取最大累计值
+                    dd[el] = max(dd.get(el, 0.0), float(parts[3]))
+        per_sym[sym] = m
+        last = _pacing(last)
+    dates = set()
+    for m in per_sym.values():
+        dates.update(m.keys())
+    out = {}
+    for d in dates:
+        sums = {}
+        for m in per_sym.values():
+            dd = m.get(d)
+            if not dd:
+                continue
+            for el, cum in dd.items():
+                sums[el] = sums.get(el, 0.0) + cum
+        out[d] = sorted(sums.items())
+    return out
+
+
+def build_turnover_profile(curves):
+    """由历史分时曲线构建预测模型。
+
+    curves: {date: [(elapsed, cum)]} → 返回 (profile, avg_daily)：
+      profile = {elapsed: 当日已完成占比均值}（fraction = 累计/全天最终）
+      avg_daily = 历史日均全天成交额(元)
+    数据不足返回 ({}, 0)。
+    """
+    fracs = {}
+    finals = []
+    for _d, pts in curves.items():
+        if not pts:
+            continue
+        final = pts[-1][1]
+        if final <= 0:
+            continue
+        finals.append(final)
+        for el, cum in pts:
+            if cum > 0:
+                fracs.setdefault(el, []).append(cum / final)
+    profile = {el: sum(v) / len(v) for el, v in fracs.items()}
+    avg_daily = sum(finals) / len(finals) if finals else 0.0
+    return profile, avg_daily
+
+
+def predict_turnover_model(amount_yuan, profile, avg_daily, now=None,
+                           min_elapsed=15, min_frac=0.04):
+    """用"历史分时占比"模型预测全日成交额（元）。
+
+    核心：当日某时刻成交额 ÷ 该时刻历史平均已完成占比 = 全日预估。
+    较纯时间线性外推更稳（开盘急拉时段占比曲线陡，不会被夸大）；
+    开盘过短 / 数据不足 / 占比异常 → 返回 None（界面显示"—"）。
+    """
+    import bisect
+    el = elapsed_trade_minutes(now)
+    if el < min_elapsed or amount_yuan <= 0 or not profile or avg_daily <= 0:
+        return None
+    keys = sorted(profile)
+    if el <= keys[0]:
+        f = profile[keys[0]]
+    elif el >= keys[-1]:
+        f = profile[keys[-1]]
+    else:
+        i = bisect.bisect_left(keys, el)
+        k0, k1 = keys[i - 1], keys[i]
+        f = profile[k0] + (profile[k1] - profile[k0]) * (el - k0) / (k1 - k0)
+    if not (min_frac <= f <= 1.0):
+        return None
+    pred = amount_yuan / f
+    # 防发散：明显偏离历史日均范围（[0.3, 3.0] 倍）视为数据异常，不预测
+    lo, hi = avg_daily * 0.3, avg_daily * 3.0
+    if not (lo <= pred <= hi):
+        return None
+    return pred
 
 
 def _sec_hist_turnover():

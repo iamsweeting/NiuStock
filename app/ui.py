@@ -466,7 +466,11 @@ class NiumenApp(MDApp):
         Clock.schedule_once(check, 10)
 
     def _show_crash(self, msg):
-        """把异常信息显示在界面浮层上，便于无 adb 时直接截图反馈。"""
+        """把异常信息显示在界面浮层上，便于无 adb 时直接截图反馈。
+
+        带"关闭"按钮，可点击移除浮层（否则异常浮层常驻、遮挡后续页面，
+        切到其它 tab 也只能在其下面运行 —— 需求反馈的"错误关闭不掉"）。
+        """
         try:
             from kivy.uix.label import Label as KivyLabel
             overlay = MDCard(
@@ -488,6 +492,30 @@ class NiumenApp(MDApp):
             lb.bind(texture_size=lambda o, *a: setattr(o, "height", o.texture_size[1]))
             sv.add_widget(lb)
             overlay.add_widget(sv)
+
+            btn_row = MDBoxLayout(
+                orientation="horizontal", size_hint_y=None, height=dp(48),
+                spacing=dp(8), padding=[dp(12), dp(6), dp(12), dp(6)],
+            )
+            close_btn = MDRaisedButton(
+                text="关闭", size_hint=(1, None), height=dp(40),
+                md_bg_color=get_color_from_hex("#37474f"),
+            )
+            close_btn.elevation = 0
+            close_btn.bind(on_release=lambda x: self._dismiss_overlay(overlay))
+            btn_row.add_widget(close_btn)
+            overlay.add_widget(btn_row)
+
             self.screen.add_widget(overlay)
+            self._overlay = overlay
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _dismiss_overlay(self, overlay):
+        try:
+            if overlay is not None and overlay.parent is not None:
+                self.screen.remove_widget(overlay)
+            if getattr(self, "_overlay", None) is overlay:
+                self._overlay = None
         except Exception:  # noqa: BLE001
             pass

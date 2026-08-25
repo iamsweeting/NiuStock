@@ -204,6 +204,59 @@ def test_predict_turnover():
                                                   tzinfo=timezone(timedelta(hours=8)))) is None
 
 
+# --------------------------------------------------------------------------
+# 历史分时占比预测模型
+# --------------------------------------------------------------------------
+
+def _flat_curve(final, points):
+    """构造一条分时曲线：points=[(elapsed, frac)]，cum = final * frac。"""
+    return [(el, final * f) for el, f in points]
+
+
+def test_minute_elapsed():
+    assert market._minute_elapsed(930) == 0
+    assert market._minute_elapsed(1000) == 30
+    assert market._minute_elapsed(1130) == 120
+    assert market._minute_elapsed(1301) == 121
+    assert market._minute_elapsed(1500) == 240
+
+
+def test_build_turnover_profile():
+    curves = {
+        "20260818": _flat_curve(2.0e12, [(30, 0.10), (120, 0.50), (240, 1.0)]),
+        "20260819": _flat_curve(2.2e12, [(30, 0.12), (120, 0.52), (240, 1.0)]),
+    }
+    profile, avg = market.build_turnover_profile(curves)
+    assert abs(avg - 2.1e12) < 1.0
+    assert abs(profile[30] - 0.11) < 1e-9
+    assert abs(profile[240] - 1.0) < 1e-9
+
+
+def test_predict_turnover_model():
+    curves = {
+        "20260818": _flat_curve(2.0e12, [(30, 0.10), (120, 0.50), (240, 1.0)]),
+        "20260819": _flat_curve(2.2e12, [(30, 0.12), (120, 0.52), (240, 1.0)]),
+    }
+    profile, avg = market.build_turnover_profile(curves)
+    # 10:00（30 分钟）已成交 2.2e11（占比 0.11）→ 预测 ≈ 2.0e12
+    p = market.predict_turnover_model(
+        0.11 * avg, profile, avg,
+        datetime(2026, 8, 20, 10, 0, tzinfo=timezone(timedelta(hours=8))))
+    assert p is not None and abs(p - avg) / avg < 0.02
+    # 开盘过短（9:40，10 分钟）→ 不预测（None）
+    assert market.predict_turnover_model(
+        0.11 * avg, profile, avg,
+        datetime(2026, 8, 20, 9, 40, tzinfo=timezone(timedelta(hours=8)))) is None
+    # 无历史曲线 → None
+    assert market.predict_turnover_model(
+        3e11, {}, 0.0, datetime(2026, 8, 20, 10, 0,
+                                tzinfo=timezone(timedelta(hours=8)))) is None
+    # 数据过少（占比 < min_frac）→ None
+    assert market.predict_turnover_model(
+        1e9, profile, avg, datetime(2026, 8, 20, 10, 0,
+                                    tzinfo=timezone(timedelta(hours=8)))) is None
+
+
 def test_refresh_ttl_const():
     assert market.REFRESH_TTL >= 60
 

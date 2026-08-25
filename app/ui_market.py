@@ -235,7 +235,7 @@ class MarketPage:
         else:
             lines.append("两市成交额：—")
         if p:
-            lines.append("本日预测额：[color=%s]%.0f[/color] 亿（已交易 %d 分钟外推）"
+            lines.append("本日预测额：[color=%s]%.0f[/color] 亿（%d分钟）"
                          % (_hex(_GREEN), p, int(market.elapsed_trade_minutes())))
         elif t:
             lines.append("本日预测额：—")

@@ -219,7 +219,11 @@ class NiumenPage:
             radius=CARD_RADIUS, elevation=0, size_hint_y=None,  # 阴影在 Adreno 崩溃
         )
         self.info_card.bind(minimum_height=self.info_card.setter("height"))
-        self.name_label = MDLabel(text="—", font_style="H6", adaptive_height=True)
+        # 名称行：小号字（与下方日期数字一致），不突出（需求）
+        self.name_label = MDLabel(
+            text="—", font_style="Subtitle2", adaptive_height=True,
+            theme_text_color="Secondary",
+        )
         self.info_card.add_widget(self.name_label)
 
         date_row = MDBoxLayout(
@@ -443,6 +447,10 @@ class NiumenPage:
             lines.append((label, col, [self.bars[i][key] for i in range(start, end + 1)]))
         window = self.bars[start:end + 1]
         self.chart.set_data(window, lines, end - start)
+        # 主图按纵坐标标签实际宽度收紧左侧预留；副图/日期轴同步对齐（需求）
+        pad_l = self.chart.pad_l
+        self.volume.set_pad_l(pad_l)
+        self.date_axis.set_pad_l(pad_l)
         self.volume.set_data(window)
         self.date_axis.set_dates([b["date"] for b in window])
 

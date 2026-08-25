@@ -330,7 +330,10 @@ class PivotPage:
         weekly = self.mode == MODE_WEEKLY
 
         def work():
-            res = api.fetch_pivot_quote(code, self.target_date, weekly=weekly)
+            try:
+                res = api.fetch_pivot_quote(code, self.target_date, weekly=weekly)
+            except Exception as e:  # noqa: BLE001（兜底：任何异常都转成可展示的失败结果）
+                res = {"ok": False, "msg": "计算失败：%s" % e}
             Clock.schedule_once(lambda dt: self._on_result(code, res), 0)
 
         threading.Thread(target=work, daemon=True).start()

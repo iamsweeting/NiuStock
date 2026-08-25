@@ -25,6 +25,7 @@ else:
         pass
 
 from . import config
+from .pivot import parse_stock_code
 
 TIMEOUT = 12
 UA = ("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
