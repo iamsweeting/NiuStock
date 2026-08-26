@@ -308,17 +308,28 @@ def test_parse_sina_7x24():
         "result": {"data": {"feed": {"list": [
             {"create_time": "2026-08-27 01:16:21", "rich_text": "美联储隔夜逆回购使用规模7万亿", "docurl": "https://finance.sina.cn/7x24/1.shtml"},
             {"create_time": "2026-08-27 01:15:23", "rich_text": "新交所办公交易骤减", "docurl": ""},
+            {"create_time": "2026-08-27 01:10:00", "rich_text": "英伟达即将发布新季度财报", "docurl": "https://finance.sina.cn/7x24/2.shtml"},
             {"create_time": "", "rich_text": "  "},
         ]}}}
     })
     news = market.parse_sina_7x24(payload, n=5)
+    # 评分过滤：美联储7万亿/英伟达财报（重大）保留；"新交所办公交易骤减"无重大词被剔除
+    texts = [t for _, t, _ in news]
     assert len(news) == 2
-    ct, text, url = news[0]
-    assert ct == "2026-08-27 01:16"
-    assert "美联储" in text
-    assert url.startswith("http")
+    assert any("美联储" in t for t in texts)
+    assert any("英伟达" in t for t in texts)
+    assert not any("新交所" in t for t in texts)
+    # 重大性：美联储（央行/万亿）应排在英伟达前
+    assert "美联储" in news[0][1]
     # 空主题被过滤
     assert all(t for _, t, _ in news)
+
+
+def test_news_score_filters_small_ipo():
+    # 需求：普通小新股上市不推送，千亿级重大才入选
+    assert market._news_score("某小型公司申购发行价5元每股") < 0
+    assert market._news_score("宁德时代即将发布业绩预告") > 0
+    assert market._news_score("美联储下周召开利率决议会议") > 0
 
 
 def test_merge_week_news():

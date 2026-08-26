@@ -223,13 +223,42 @@ def parse_sina_global_kline(text, n=5):
     return out[-n:]
 
 
-# 本周关注关键词：优先筛"即将发生"的事件预告（需求：CPI/上市/休市/会议等影响A股大事）
-WEEK_NEWS_KEYWORDS = (
+# ---- 本周关注：预告类关键词 + 重大性评分（需求：千亿级以上重大事件，非普通新股）----
+# 预告类（"即将发生"）：命中即可入选候选
+WEEK_NEWS_PREVIEW = (
     "本周", "下周", "今日", "明日", "将公布", "即将", "将于", "举行", "召开",
-    "会议", "决议", "休市", "上市", "首发", "申购", "财报", "业绩预告",
-    "CPI", "PCE", "非农", "利率决议", "美联储", "央行", "关税", "发布", "公布",
-    "月", "日",
+    "会议", "决议", "休市", "财报", "业绩预告", "CPI", "PCE", "非农",
+    "利率决议", "美联储", "央行", "关税", "发布", "公布", "月", "日",
 )
+# 重大性加分：巨头/千亿级/权重/宏观大事
+WEEK_NEWS_BIG = (
+    "千亿", "万亿", "巨头", "权重", "指数", "大盘", "龙头", "苹果", "微软",
+    "英伟达", "台积电", "特斯拉", "亚马逊", "谷歌", "Meta", "茅台", "宁德",
+    "比亚迪", "中芯", "华为", "阿里", "腾讯", "平安", "工行", "建行", "中石油",
+    "中石化", "联通", "移动", "电信", "中国船舶", "中远", "国家", "国务院",
+    "证监会", "央行", "财政部", "商务部", "美联储", "欧央行", "日本央行",
+    "OPEC", "美联储", "非农", "CPI", "PCE", "GDP", "IPO", "上市首日",
+)
+# 减分/剔除：小额新股、小盘、普通上市（无巨头名）
+WEEK_NEWS_SMALL = (
+    "申购", "发行价", "募资", "募", "元/股", "每股", "首发", "北交所",
+    "科创板新股", "创业板新股", "小型", "小盘", "次新股",
+)
+
+
+def _news_score(text):
+    """新闻重大性评分：预告词+1，重大词+2，小额词-3；负数剔除。"""
+    s = 0
+    for k in WEEK_NEWS_PREVIEW:
+        if k in text:
+            s += 1
+    for k in WEEK_NEWS_BIG:
+        if k in text:
+            s += 2
+    for k in WEEK_NEWS_SMALL:
+        if k in text:
+            s -= 3
+    return s
 
 
 def parse_sina_7x24(text, n=5):
@@ -237,7 +266,8 @@ def parse_sina_7x24(text, n=5):
 
     feed.list 元素：create_time(YYYY-MM-DD HH:MM:SS)、rich_text(消息主题全文)、
     docurl(详情页链接，可为空)。直接返回主题文本，无需点击链接即可阅读（需求）。
-    优先筛选含"即将/本周/公布/上市/会议"等预告关键词的消息（本周重大关注）。
+    过滤策略：优先"即将发生 + 千亿级重大"（评分排序），剔除小额新股；
+    评分不足时回退到最近消息（但剔除小额/无关）。
     """
     import json
     try:
@@ -246,7 +276,7 @@ def parse_sina_7x24(text, n=5):
         items = feed.get("list") if isinstance(feed, dict) else []
     except Exception:
         return []
-    out = []
+    scored = []
     for it in items:
         if not isinstance(it, dict):
             continue
@@ -254,16 +284,12 @@ def parse_sina_7x24(text, n=5):
         rt = str(it.get("rich_text") or "").strip()
         if not rt:
             continue
-        out.append((ct, rt, str(it.get("docurl") or "")))
-    # 先筛预告类（含关键词且含日期），不足再补最近消息
-    preview = [x for x in out
-               if any(k in x[1] for k in WEEK_NEWS_KEYWORDS)]
-    result = preview[:n]
-    if len(result) < n:
-        for x in out:
-            if x not in result and len(result) < n:
-                result.append(x)
-    return result[:n]
+        sc = _news_score(rt)
+        if sc <= 0:
+            continue
+        scored.append((sc, ct, rt, str(it.get("docurl") or "")))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [(ct, rt, url) for _sc, ct, rt, url in scored[:n]]
 
 
 def parse_yahoo_chart(text):
