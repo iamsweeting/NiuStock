@@ -286,31 +286,37 @@ class NiumenPage:
 
     @staticmethod
     def _values_row(label, col, value, pct):
-        """一行明细：名称(自适应) + 数值(固定右对齐) + ●(固定) + 百分比(固定右对齐)。"""
+        """一行明细：名称(自适应) + 数值(固定右对齐) + ●(固定) + 百分比(固定右对齐)。
+
+        所有单元格 size_hint_y=1 填满行高 + text_size 双向限宽（shorten/max_lines=1），
+        保证单行不换行、● 纵向对齐（需求：⚪ 上下对齐美观）。
+        """
         dot_col = config.COLOR_UP if pct >= 0 else config.COLOR_DOWN
         row = MDBoxLayout(
-            orientation="horizontal", size_hint_y=None, height=dp(26), spacing=dp(4),
+            orientation="horizontal", size_hint_y=None, height=dp(26), spacing=dp(2),
         )
-        row.add_widget(MDLabel(
-            text=label, size_hint_x=1, adaptive_height=True,
+
+        def _cell(text, width, tc, align):
+            lb = MDLabel(
+                text=text, size_hint=(None, 1), width=dp(width),
+                theme_text_color="Custom", text_color=tc,
+                halign=align, valign="middle", font_style="Body2",
+                shorten=True, max_lines=1,
+            )
+            lb.bind(size=lambda o, *a: setattr(o, "text_size", (o.width, o.height)))
+            return lb
+
+        name_lb = MDLabel(
+            text=label, size_hint_x=1, size_hint_y=1,
             theme_text_color="Custom", text_color=col,
             halign="left", valign="middle", font_style="Body2",
-        ))
-        row.add_widget(MDLabel(
-            text=value, size_hint=(None, 1), width=dp(92),
-            theme_text_color="Custom", text_color=(1, 1, 1, 1),
-            halign="right", valign="middle", font_style="Body2",
-        ))
-        row.add_widget(MDLabel(
-            text="●", size_hint=(None, 1), width=dp(20),
-            theme_text_color="Custom", text_color=dot_col,
-            halign="center", valign="middle", font_style="Body2",
-        ))
-        row.add_widget(MDLabel(
-            text="%+.1f%%" % pct, size_hint=(None, 1), width=dp(76),
-            theme_text_color="Custom", text_color=dot_col,
-            halign="right", valign="middle", font_style="Body2",
-        ))
+            shorten=True, max_lines=1,
+        )
+        name_lb.bind(size=lambda o, *a: setattr(o, "text_size", (o.width, o.height)))
+        row.add_widget(name_lb)
+        row.add_widget(_cell(value, 88, (1, 1, 1, 1), "right"))
+        row.add_widget(_cell("●", 18, dot_col, "center"))
+        row.add_widget(_cell("%+.1f%%" % pct, 74, dot_col, "right"))
         return row
 
     def _build_judgment_card(self, box):
