@@ -257,7 +257,7 @@ class PivotPage:
 
         box.add_widget(MDLabel(
             text="五种算法：经典 / 斐波那契 / 卡玛利亚 / 伍迪 / 迪马克\n"
-                 "红/绿底色=验证误差≤1%（最优），橙/黄=≤2%（次优）\n"
+                 "红/绿底色=验证误差≤0.5%（最优），橙/黄=≤1%（次优）\n"
                  "统一数据源：腾讯财经（默认）→ 新浪财经（备用）\n"
                  "点击单元格复制 · 指标仅供技术分析参考，不构成投资建议",
             font_style="Caption", theme_text_color="Hint",
@@ -342,6 +342,29 @@ class PivotPage:
 
         threading.Thread(target=work, daemon=True).start()
 
+    def _fit_price_fonts(self):
+        """按数值长度自动缩小字号（恒生/茅台等大数值保持单行，需求）。
+
+        只在此处一次性设置 font_size（不做持续绑定，避免 Adreno 回调链崩溃）；
+        text_size 双向限宽保证不换行。
+        """
+        for lb in (self.v_high, self.v_low, self.v_close):
+            try:
+                n = len(lb.text)
+                # 每字符估算：中文/全角≈1.0em，数字/半角≈0.55em；em=字号
+                est = 0.0
+                for ch in lb.text:
+                    est += 1.0 if ord(ch) > 0x2E7F else 0.55
+                if est <= 0:
+                    continue
+                w = lb.width
+                if w <= 0:
+                    w = dp(110)   # 未布局时按每列约 110dp 估算
+                fs = max(7, min(11, int(w / (est * dp(1)) * 0.94)))
+                lb.font_size = dp(fs)
+            except Exception:  # noqa: BLE001
+                pass
+
     def _on_result(self, raw, res):
         self._busy = False
         self.calc_btn.disabled = False
@@ -358,6 +381,7 @@ class PivotPage:
             self.v_high.text = "最高 —"
             self.v_low.text = "最低 —"
             self.v_close.text = "收盘 —"
+            self._fit_price_fonts()
             self.source_note.text = ""
             return
 
@@ -376,6 +400,7 @@ class PivotPage:
         self.v_high.text = "最高 %.3f" % res["verify_high"]
         self.v_low.text = "最低 %.3f" % res["verify_low"]
         self.v_close.text = "收盘 %.3f" % res["verify_close"]
+        self._fit_price_fonts()
         # 需求 4：仅小字备注实际命中的数据源，不显示切换
         self.source_note.text = "数据源：%s（自动）" % res["source"]
 

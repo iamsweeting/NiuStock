@@ -273,6 +273,8 @@ class MarketPage:
             vc = _GREEN if vp >= 0 else _RED
             lines.append("较上日变化：[color=%s]%+.0f[/color] 亿"
                          % (_hex(vc), vp))
+        else:
+            lines.append("较上日变化：—")
         self.turnover_label.text = "\n".join(lines)
 
     def _render_quotes(self, quotes=None):

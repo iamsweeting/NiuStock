@@ -223,11 +223,21 @@ def parse_sina_global_kline(text, n=5):
     return out[-n:]
 
 
+# 本周关注关键词：优先筛"即将发生"的事件预告（需求：CPI/上市/休市/会议等影响A股大事）
+WEEK_NEWS_KEYWORDS = (
+    "本周", "下周", "今日", "明日", "将公布", "即将", "将于", "举行", "召开",
+    "会议", "决议", "休市", "上市", "首发", "申购", "财报", "业绩预告",
+    "CPI", "PCE", "非农", "利率决议", "美联储", "央行", "关税", "发布", "公布",
+    "月", "日",
+)
+
+
 def parse_sina_7x24(text, n=5):
     """解析新浪 7x24 快讯 → 最近 n 条 [(时间, 主题全文, 详情链接)]。
 
     feed.list 元素：create_time(YYYY-MM-DD HH:MM:SS)、rich_text(消息主题全文)、
     docurl(详情页链接，可为空)。直接返回主题文本，无需点击链接即可阅读（需求）。
+    优先筛选含"即将/本周/公布/上市/会议"等预告关键词的消息（本周重大关注）。
     """
     import json
     try:
@@ -245,7 +255,15 @@ def parse_sina_7x24(text, n=5):
         if not rt:
             continue
         out.append((ct, rt, str(it.get("docurl") or "")))
-    return out[:n]
+    # 先筛预告类（含关键词且含日期），不足再补最近消息
+    preview = [x for x in out
+               if any(k in x[1] for k in WEEK_NEWS_KEYWORDS)]
+    result = preview[:n]
+    if len(result) < n:
+        for x in out:
+            if x not in result and len(result) < n:
+                result.append(x)
+    return result[:n]
 
 
 def parse_yahoo_chart(text):
@@ -689,12 +707,15 @@ def _sec_hist_wti():
 
 
 def _sec_week_news():
-    """四、本周重大关注：新浪 7x24 快讯 ≤5 条（主题全文 + 隐式链接）。"""
+    """四、本周重大关注：新浪 7x24 快讯 ≤5 条（主题全文 + 隐式链接）。
+
+    多抓 60 条，优先筛"即将/本周/公布/上市/会议"等预告类消息（需求）。
+    """
     sess = _session()
     data = {"errors": []}
     try:
         text = _get_text(sess, SINA_7X24, params={
-            "page": "1", "page_size": "10", "zhibo_id": "152",
+            "page": "1", "page_size": "60", "zhibo_id": "152",
             "tag_id": "0", "dire": "f", "dpc": "1"},
             headers={"Referer": "https://finance.sina.com.cn/"})
         data["news"] = parse_sina_7x24(text)
