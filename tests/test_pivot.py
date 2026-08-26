@@ -148,6 +148,7 @@ def test_config_pivot_constants():
     assert config.PIVOT_SOURCE_CHAIN[1] == config.SOURCE_SINA
     assert len(config.PIVOT_ALGORITHMS) == 5
     assert config.DISPLAY_POINTS == 10
+    # 默认名单：159516 第一、688008 第二、513310 第三（需求）
     assert config.DEFAULT_WATCHLIST[0]["code"] == "sz159516"
-    assert config.DEFAULT_WATCHLIST[1]["code"] == "sh513310"
-    assert config.DEFAULT_WATCHLIST[2]["code"] == "sz159845"
+    assert config.DEFAULT_WATCHLIST[1]["code"] == "sh688008"
+    assert config.DEFAULT_WATCHLIST[2]["code"] == "sh513310"

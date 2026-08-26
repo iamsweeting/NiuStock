@@ -104,13 +104,13 @@ def interpret(bar, version):
     levels = []
     if nml is not None:
         if c < nml:
-            levels.append(("压力", "YL 压力线", nml, "距 %.1f%%" % abs(_pct_above(c, nml))))
+            levels.append(("压力", config.IND_NAMES["yl"], nml, "距 %.1f%%" % abs(_pct_above(c, nml))))
         else:
-            levels.append(("支撑", "YL 压力线", nml, "已站上"))
+            levels.append(("支撑", config.IND_NAMES["yl"], nml, "已站上"))
     if qrl is not None and nml is not None and c >= nml:
-        levels.append(("压力", "QL 止盈线", qrl, "上方空间"))
+        levels.append(("压力", config.IND_NAMES["ql"], qrl, "上方空间"))
     if smx is not None:
-        levels.append(("支撑", "ZS 止损线", smx, "上方" if c >= smx else "下方"))
+        levels.append(("支撑", config.IND_NAMES["zs"], smx, "上方" if c >= smx else "下方"))
     if has_cost and cbx60 is not None and cbx20 is not None and c >= cbx60 and c < cbx20:
         levels.append(("提示", "CBX20", cbx20, "短期压力"))
 

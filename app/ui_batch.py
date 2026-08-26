@@ -214,8 +214,7 @@ class BatchPage:
         """「近期查询」：填入除大盘预设外的最近查询代码并自动计算。
 
         数据来源：本地查询名单（user_data_dir/watchlist.json，重启保留）。
-        记录逻辑：牛门线/枢轴点/批量查询成功即写入（批量排除大盘预设码），
-        最近在前、去重、上限 config.WATCHLIST_LIMIT。
+        排序：前三名按门槛排名，其余按查询次数降序（count 累计）。
         """
         items = self.app.watchlist.items()
         recent = [it["code"] for it in items

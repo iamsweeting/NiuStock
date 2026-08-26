@@ -145,23 +145,25 @@ class NiumenPage:
     def _refresh_chips(self):
         """按查询名单前 3 个重建快捷按钮；长按从名单移除。
 
-        名称 ≤4 字用大号字；更长则缩字号并允许两行显示（需求 3）。
+        名称 ≤4 字用大号字；更长则缩字号并允许两行显示；
+        过长名称（如"国泰中证半导体材料设备主题ETF"）按能放几个字放几个字截断（需求）。
         """
+        from .batch import name_display
         self.chips_row.clear_widgets()
         for item in self.app.watchlist.top(3):
             name = item["name"]
-            n = len(name)
-            if n > 4:
+            text, lines = name_display(name, chars_per_line=5, max_lines=2)
+            if lines > 1:
                 height, font = dp(46), 11
             else:
                 height, font = dp(36), 14
             b = MDRaisedButton(
-                text=name, size_hint_x=1, size_hint_y=None, height=height,
+                text=text, size_hint_x=1, size_hint_y=None, height=height,
                 md_bg_color=CHIP_BG, text_color=(1, 1, 1, 1),
                 font_size=dp(font), halign="center", valign="center",
             )
             b.elevation = 0
-            if n > 4:
+            if lines > 1:
                 # 长名称允许换行（两行）
                 b.bind(width=lambda w, *a: setattr(
                     w, "text_size", (w.width - dp(8), None)))
@@ -273,12 +275,43 @@ class NiumenPage:
             text="—", font_style="H5", adaptive_height=True,
             theme_text_color="Custom", text_color=config.COLOR_UP,
         )
-        self.values_label = MDLabel(
-            text="", markup=True, font_style="Body1", adaptive_height=True,
+        # 数值明细行：用逐行 BoxLayout（名称/数值/●/百分比 固定列宽），
+        # 保证 ● 纵向对齐（需求：⚪ 上下对齐美观）
+        self.values_box = MDBoxLayout(
+            orientation="vertical", spacing=dp(2), adaptive_height=True,
         )
         self.values_card.add_widget(self.close_label)
-        self.values_card.add_widget(self.values_label)
+        self.values_card.add_widget(self.values_box)
         box.add_widget(self.values_card)
+
+    @staticmethod
+    def _values_row(label, col, value, pct):
+        """一行明细：名称(自适应) + 数值(固定右对齐) + ●(固定) + 百分比(固定右对齐)。"""
+        dot_col = config.COLOR_UP if pct >= 0 else config.COLOR_DOWN
+        row = MDBoxLayout(
+            orientation="horizontal", size_hint_y=None, height=dp(26), spacing=dp(4),
+        )
+        row.add_widget(MDLabel(
+            text=label, size_hint_x=1, adaptive_height=True,
+            theme_text_color="Custom", text_color=col,
+            halign="left", valign="middle", font_style="Body2",
+        ))
+        row.add_widget(MDLabel(
+            text=value, size_hint=(None, 1), width=dp(92),
+            theme_text_color="Custom", text_color=(1, 1, 1, 1),
+            halign="right", valign="middle", font_style="Body2",
+        ))
+        row.add_widget(MDLabel(
+            text="●", size_hint=(None, 1), width=dp(20),
+            theme_text_color="Custom", text_color=dot_col,
+            halign="center", valign="middle", font_style="Body2",
+        ))
+        row.add_widget(MDLabel(
+            text="%+.1f%%" % pct, size_hint=(None, 1), width=dp(76),
+            theme_text_color="Custom", text_color=dot_col,
+            halign="right", valign="middle", font_style="Body2",
+        ))
+        return row
 
     def _build_judgment_card(self, box):
         self.judgment_card = MDCard(
@@ -487,16 +520,11 @@ class NiumenPage:
                 continue
             # 需求：状态文字（未突破/逼近/上方…）改为 数值 + 距收盘百分比
             pct = (close - v) / v * 100.0 if v else 0.0
-            rows_data.append((v, key, label, col, pct))
+            rows_data.append((v, label, col, pct))
         rows_data.sort(key=lambda x: x[0], reverse=True)
-        rows_html = []
-        for v, key, label, col, pct in rows_data:
-            dot_col = _hex(config.COLOR_UP) if pct >= 0 else _hex(config.COLOR_DOWN)
-            rows_html.append(
-                "[color=%s]%s[/color]  %s   [color=%s]●[/color] %+.1f%%"
-                % (_hex(col), label, _fmt(v), dot_col, pct)
-            )
-        self.values_label.text = "\n".join(rows_html)
+        self.values_box.clear_widgets()
+        for v, label, col, pct in rows_data:
+            self.values_box.add_widget(self._values_row(label, col, _fmt(v), pct))
 
     def _update_judgment(self):
         b = self.bars[self.sel_idx]

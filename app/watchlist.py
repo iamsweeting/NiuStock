@@ -2,9 +2,15 @@
 """牛门线查询名单（自选）持久化。
 
 规则（需求确认）：
-  - 每次查询成功的代码按「最近查询顺序」去重，最新在前；
-  - 上限 config.WATCHLIST_LIMIT（20 条），超出淘汰最旧；
-  - 首次安装预置默认名单（159516 / 513310 / 159845 三只 ETF）；
+  - 每个代码记录累计查询次数 count（重启保留）；
+  - 排序分两段：
+      前三名（快捷按钮）：受门槛保护 —— 进入第1名需比现第1名多 +30 次，
+          进入第2/3名需比现任多 +50 次；每次触摸最多升一位（无级联）。
+      第4名以后（近期查询列表）：纯按 count 降序排列。
+  - 第三名被替换：第4名（或更后）代码 count 比现第3名多 ≥50 时顶掉它，
+      原第3名顺延到第4名（同一次触摸只升一位，不继续往上顶）。
+  - 上限 config.WATCHLIST_LIMIT（10 条），超出淘汰排名最末；
+  - 首次安装预置默认名单（159516 半导体设备ETF / 688008 澜起科技 / 513310 中韩半导体ETF）；
   - 提供管理：remove(code) 删除单条、clear() 清空全部。
 
 存储：Android 上为应用私有存储 user_data_dir/watchlist.json；
@@ -19,7 +25,7 @@ from . import config
 class Watchlist:
     def __init__(self, path=None):
         self.path = path
-        self._items = []          # [{"code": ..., "name": ...}] 最新在前
+        self._items = []          # [{"code": ..., "name": ..., "count": n}] 排名在前
         self._loaded = False
 
     # ------------------------------------------------------------------
@@ -49,18 +55,27 @@ class Watchlist:
                     data = json.load(f)
                 if isinstance(data, list):
                     items = []
+                    old_format = False
                     for it in data:
                         if isinstance(it, dict) and it.get("code"):
                             items.append({
                                 "code": str(it["code"]),
                                 "name": str(it.get("name") or it["code"]),
+                                "count": int(it.get("count") or 0),
                             })
+                            if "count" not in it:
+                                old_format = True
                     if items:
+                        if old_format:
+                            # 旧数据（最近在前、无 count）：默认前三置顶，其余保留
+                            items = self._migrate_old(items)
+                        else:
+                            items = self._rank(items, touched_code=None)
                         self._items = items[:config.WATCHLIST_LIMIT]
                         return self._items
         except Exception:  # noqa: BLE001
             pass
-        self._items = [dict(it) for it in config.DEFAULT_WATCHLIST]
+        self._items = [dict(it, count=0) for it in config.DEFAULT_WATCHLIST]
         return self._items
 
     def _save(self):
@@ -77,22 +92,80 @@ class Watchlist:
             pass
 
     # ------------------------------------------------------------------
+    # 排序
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _promote_threshold(target_index):
+        """进入 target_index 名次所需超过的次数（0 为第 1 名）。"""
+        return config.RANK_PROMOTE_TOP1 if target_index == 0 else config.RANK_PROMOTE_OTHER
+
+    @staticmethod
+    def _migrate_old(items):
+        """旧格式迁移：默认前三置顶（count=0），其余代码按原顺序跟在后面。"""
+        default_codes = [d["code"] for d in config.DEFAULT_WATCHLIST]
+        head = [dict(d, count=0) for d in config.DEFAULT_WATCHLIST]
+        seen = set(default_codes)
+        tail = [it for it in items if it["code"] not in seen]
+        return head + tail
+
+    def _rank(self, items, touched_code):
+        """排序：
+        1) 第4名以后纯按 count 降序；
+        2) 前三名门槛保护：被触摸项最多升一位（无级联）；
+           无触摸对象（加载时）只做一次逐对门槛检查。
+        """
+        items = list(items)
+        # 1) 尾部（第4名以后）纯 count 降序
+        if len(items) > 3:
+            head, tail = items[:3], items[3:]
+            tail.sort(key=lambda it: it["count"], reverse=True)
+            items = head + tail
+        # 2) 前三名门槛升级
+        if touched_code is None:
+            # 加载：按固定顺序逐对检查，最多移动一位（防止旧数据整体重排抖动）
+            for i in (2, 1):
+                if len(items) > i + 1:
+                    need = self._promote_threshold(i)
+                    if items[i + 1]["count"] - items[i]["count"] >= need:
+                        items[i], items[i + 1] = items[i + 1], items[i]
+                        break
+            return items
+        idx = next((i for i, it in enumerate(items) if it["code"] == touched_code), -1)
+        if 1 <= idx <= 3:
+            above = items[idx - 1]
+            need = self._promote_threshold(idx - 1)
+            if items[idx]["count"] - above["count"] >= need:
+                items[idx - 1], items[idx] = items[idx], items[idx - 1]
+        return items
+
+    # ------------------------------------------------------------------
     # 操作
     # ------------------------------------------------------------------
     def items(self):
-        """当前名单（最新在前）。"""
+        """当前名单（按排名）。"""
         self.load()
         return list(self._items)
 
     def touch(self, code, name=None):
-        """查询成功后记录：去重、移到最前、裁剪上限、落盘。"""
+        """查询成功后记录：count +1，按阈值重排（最多升一位），裁剪上限，落盘。"""
         self.load()
         code = (code or "").strip()
         if not code:
             return
-        new_item = {"code": code, "name": (name or code).strip()}
-        self._items = [it for it in self._items if it["code"] != code]
-        self._items.insert(0, new_item)
+        found = None
+        for it in self._items:
+            if it["code"] == code:
+                found = it
+                break
+        if found:
+            found["count"] = found.get("count", 0) + 1
+            if name:
+                found["name"] = (name or code).strip()
+        else:
+            self._items.append({
+                "code": code, "name": (name or code).strip(), "count": 1,
+            })
+        self._items = self._rank(self._items, touched_code=code)
         self._items = self._items[:config.WATCHLIST_LIMIT]
         self._save()
 
@@ -107,7 +180,7 @@ class Watchlist:
     def clear(self):
         """清空全部（回到默认预置名单）。"""
         self.load()
-        self._items = [dict(it) for it in config.DEFAULT_WATCHLIST]
+        self._items = [dict(it, count=0) for it in config.DEFAULT_WATCHLIST]
         self._save()
 
     def top(self, n=3):
@@ -118,5 +191,5 @@ class Watchlist:
             if len(items) >= n:
                 break
             if it["code"] not in seen:
-                items.append(dict(it))
+                items.append(dict(it, count=0))
         return items[:n]
