@@ -220,49 +220,23 @@ class PivotPage:
         vrow = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(30), spacing=dp(8),
         )
-        # 需求：字体不宜过大，数字大时自动缩小字号（恒生/茅台等大数值不换行，
-        # 避免覆盖上方"验证："文字）
+        # 需求：字体不宜过大，数字大时保持单行（恒生/茅台等大数值不换行，
+        # 避免覆盖上方"验证："文字）。用固定小字号 + 一次性 text_size 裁剪，
+        # 不做 width/size 动态绑定（Adreno 上回调链易触发递归崩溃）。
         self.v_high = MDLabel(text="最高 —", size_hint_x=1, adaptive_height=True,
                               theme_text_color="Custom", text_color=_RED, valign="middle",
-                              font_size=dp(12))
+                              font_size=dp(11))
         self.v_low = MDLabel(text="最低 —", size_hint_x=1, adaptive_height=True,
                              theme_text_color="Custom", text_color=_GREEN, valign="middle",
-                             font_size=dp(12))
+                             font_size=dp(11))
         self.v_close = MDLabel(text="收盘 —", size_hint_x=1, adaptive_height=True,
                                theme_text_color="Custom", text_color=(1, 1, 1, 1), valign="middle",
-                               font_size=dp(12))
-        for _lb in (self.v_high, self.v_low, self.v_close):
-            # 只绑 width（不绑 size）：回调只改 font_size 不会改布局大小，
-            # 避免 font_size→size→回调 的无限递归崩溃
-            _lb.bind(width=self._fit_price_label)
+                               font_size=dp(11))
         vrow.add_widget(self.v_high)
         vrow.add_widget(self.v_low)
         vrow.add_widget(self.v_close)
         info_card.add_widget(vrow)
         box.add_widget(info_card)
-
-    @staticmethod
-    def _fit_price_label(lb, *args):
-        """按文本长度与可用宽度自动缩小字号，保证单行显示（不覆盖上方"验证："）。"""
-        try:
-            w = lb.width
-            if w <= 0:
-                return
-            n = len(lb.text)
-            # 每字符估算宽度：中文/全角≈1.0em，数字/半角≈0.55em，em=字号
-            est = 0.0
-            for ch in lb.text:
-                est += 1.0 if ord(ch) > 0x2E7F else 0.55
-            if est <= 0:
-                return
-            # 目标：est * font_size ≈ 可用宽度 * 0.96；字号下限 8、上限 12
-            fs = max(8, min(12, int(w / (est * dp(1)) * 0.96)))
-            lb.font_size = dp(fs)
-            lb.text_size = (w, None)
-            lb.halign = "left"
-            lb.valign = "middle"
-        except Exception:  # noqa: BLE001
-            pass
 
         # 数据源备注（小字，不提供切换）
         self.source_note = MDLabel(
