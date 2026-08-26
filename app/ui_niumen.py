@@ -288,31 +288,40 @@ class NiumenPage:
     def _values_row(label, col, value, pct):
         """一行明细：名称(自适应) + 数值(固定右对齐) + ●(固定) + 百分比(固定右对齐)。
 
-        所有单元格 size_hint_y=1 填满行高 + text_size 双向限宽（shorten/max_lines=1），
-        保证单行不换行、● 纵向对齐（需求：⚪ 上下对齐美观）。
+        单行保证方案：按文本长度与列宽自适应字号（不用 shorten/text_size 递归绑定，
+        避免 Kivy 上 size→text_size 无限循环崩溃），所有单元格固定行高填满。
         """
         dot_col = config.COLOR_UP if pct >= 0 else config.COLOR_DOWN
         row = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(26), spacing=dp(2),
         )
 
+        def _fit_font(text, width, base=12):
+            """估算字号：全角≈1.0em、半角≈0.55em，目标在 width 内单行放下。"""
+            est = 0.0
+            for ch in text:
+                est += 1.0 if ord(ch) > 0x2E7F else 0.55
+            if est <= 0:
+                return base
+            return max(8, min(base, int(width / (est * dp(1)) * 0.94)))
+
         def _cell(text, width, tc, align):
             lb = MDLabel(
                 text=text, size_hint=(None, 1), width=dp(width),
                 theme_text_color="Custom", text_color=tc,
                 halign=align, valign="middle", font_style="Body2",
-                shorten=True, max_lines=1,
+                font_size=dp(_fit_font(text, width)),
             )
-            lb.bind(size=lambda o, *a: setattr(o, "text_size", (o.width, o.height)))
             return lb
 
         name_lb = MDLabel(
             text=label, size_hint_x=1, size_hint_y=1,
             theme_text_color="Custom", text_color=col,
             halign="left", valign="middle", font_style="Body2",
-            shorten=True, max_lines=1,
         )
-        name_lb.bind(size=lambda o, *a: setattr(o, "text_size", (o.width, o.height)))
+        # 名称列宽自适应：行总宽减去固定列后剩余；字号随名称长度收缩
+        name_lb.bind(width=lambda o, *a: setattr(
+            o, "font_size", dp(_fit_font(o.text, o.width))))
         row.add_widget(name_lb)
         row.add_widget(_cell(value, 88, (1, 1, 1, 1), "right"))
         row.add_widget(_cell("●", 18, dot_col, "center"))

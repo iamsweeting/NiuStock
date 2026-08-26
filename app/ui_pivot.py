@@ -232,7 +232,9 @@ class PivotPage:
                                theme_text_color="Custom", text_color=(1, 1, 1, 1), valign="middle",
                                font_size=dp(12))
         for _lb in (self.v_high, self.v_low, self.v_close):
-            _lb.bind(size=self._fit_price_label, text=self._fit_price_label)
+            # 只绑 width（不绑 size）：回调只改 font_size 不会改布局大小，
+            # 避免 font_size→size→回调 的无限递归崩溃
+            _lb.bind(width=self._fit_price_label)
         vrow.add_widget(self.v_high)
         vrow.add_widget(self.v_low)
         vrow.add_widget(self.v_close)
