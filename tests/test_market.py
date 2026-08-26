@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """大盘信息模块单元测试（纯解析函数，不访问网络）。"""
+import json
 from datetime import datetime, time, timezone, timedelta
 
 from app import market
@@ -294,3 +295,43 @@ def test_new_state_shape():
     out = market._new_state()
     assert out["live"]["quotes"] == [] and out["live"]["errors"] == []
     assert out["history"]["turnover"] == [] and "kr" not in out["history"]
+    assert "news" in out["history"]
+    assert "turnover_vs_prev" in out["live"]
+
+
+# --------------------------------------------------------------------------
+# 本周重大关注（新浪 7x24 解析）
+# --------------------------------------------------------------------------
+
+def test_parse_sina_7x24():
+    payload = json.dumps({
+        "result": {"data": {"feed": {"list": [
+            {"create_time": "2026-08-27 01:16:21", "rich_text": "美联储隔夜逆回购使用规模7万亿", "docurl": "https://finance.sina.cn/7x24/1.shtml"},
+            {"create_time": "2026-08-27 01:15:23", "rich_text": "新交所办公交易骤减", "docurl": ""},
+            {"create_time": "", "rich_text": "  "},
+        ]}}}
+    })
+    news = market.parse_sina_7x24(payload, n=5)
+    assert len(news) == 2
+    ct, text, url = news[0]
+    assert ct == "2026-08-27 01:16"
+    assert "美联储" in text
+    assert url.startswith("http")
+    # 空主题被过滤
+    assert all(t for _, t, _ in news)
+
+
+def test_merge_week_news():
+    out = market._new_state()
+    market._merge_section(out, "week_news", {
+        "news": [("2026-08-27 01:16", "美联储逆回购7万亿", "https://x")],
+        "errors": [],
+    })
+    assert out["history"]["news"][0][1] == "美联储逆回购7万亿"
+
+
+def test_merge_turnover_vs_prev():
+    out = market._new_state()
+    market._merge_section(out, "live_sina", {
+        "turnover_yi": 10000.0, "turnover_vs_prev": 123.0, "errors": []})
+    assert out["live"]["turnover_vs_prev"] == 123.0

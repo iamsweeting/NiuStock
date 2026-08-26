@@ -267,8 +267,10 @@ class DateAxis(BoxLayout):
         self.padding = [self.pad_l, 0, dp(8), 0]
 
     def set_dates(self, dates):
-        """日期标签：第一个带月（07-27），中间只显示日（28 29 30 31），
-        跨月那天带月（08-03），随后只显示日（04 05 06 07）。"""
+        """日期标签（21 个交易日，隔一天标注一个，避免拥挤）：
+        第 0 个、第 2 个、第 4 个……标注；首日与跨月日带月（07-27 / 08-03），
+        其余只显示日（28 30 01 03 05…）。
+        """
         prev_month = None
         for i, lb in enumerate(self._labels):
             if i >= len(dates):
@@ -276,8 +278,11 @@ class DateAxis(BoxLayout):
                 continue
             d = dates[i]
             mm, dd = d[5:7], d[8:10]
-            if i == 0 or mm != prev_month:
-                lb.text = "%s-%s" % (mm, dd)
+            if i % 2 == 0:   # 隔一天标注一个（需求）
+                if i == 0 or mm != prev_month:
+                    lb.text = "%s-%s" % (mm, dd)
+                else:
+                    lb.text = dd
             else:
-                lb.text = dd
+                lb.text = ""
             prev_month = mm

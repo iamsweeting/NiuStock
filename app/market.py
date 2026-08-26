@@ -35,6 +35,11 @@ SINA_HS300 = ("https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.
               "Market_Center.getHQNodeData")
 SINA_GLOBAL_KLINE = ("https://stock2.finance.sina.com.cn/futures/api/jsonp.php/"
                      "var%20_=/GlobalFuturesService.getGlobalFuturesDailyKLine")
+# 新浪财经 7x24 快讯（zhibo feed：rich_text=消息主题全文，docurl=详情链接）——
+# "本周重大关注"数据源（需求：直接显示消息主题，不点链接也能看到内容）
+SINA_7X24 = "https://zhibo.sina.com.cn/api/zhibo/feed"
+# 新浪财经要闻（滚动列表，备选源）
+SINA_ROLL_NEWS = "https://feed.mix.sina.com.cn/api/roll/get"
 CHINAMONEY_CCPR = "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-ccpr/CcprHisNew"
 EM_KLINE = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 # 腾讯当日分时（day/query）：每交易日末累计成交额(元)，含指数/ETF/个股 —— 两市成交额历史主源
@@ -218,6 +223,31 @@ def parse_sina_global_kline(text, n=5):
     return out[-n:]
 
 
+def parse_sina_7x24(text, n=5):
+    """解析新浪 7x24 快讯 → 最近 n 条 [(时间, 主题全文, 详情链接)]。
+
+    feed.list 元素：create_time(YYYY-MM-DD HH:MM:SS)、rich_text(消息主题全文)、
+    docurl(详情页链接，可为空)。直接返回主题文本，无需点击链接即可阅读（需求）。
+    """
+    import json
+    try:
+        d = json.loads(text)
+        feed = d["result"]["data"]["feed"]
+        items = feed.get("list") if isinstance(feed, dict) else []
+    except Exception:
+        return []
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        ct = str(it.get("create_time") or "")[:16]
+        rt = str(it.get("rich_text") or "").strip()
+        if not rt:
+            continue
+        out.append((ct, rt, str(it.get("docurl") or "")))
+    return out[:n]
+
+
 def parse_yahoo_chart(text):
     """解析 Yahoo chart JSON → (price, [(date, close)...])。"""
     import json
@@ -320,7 +350,7 @@ def _pacing(prev, gap=0.25):
 # --------------------------------------------------------------------------
 
 def _sec_live_sina():
-    """实时①：新浪批量行情 + 两市成交额 + 本日预测额（历史分时占比模型）。"""
+    """实时①：新浪批量行情 + 两市成交额 + 本日预测额 + 较上日同时段变化。"""
     sess = _session()
     data = {"quotes": [], "errors": []}
     try:
@@ -345,10 +375,42 @@ def _sec_live_sina():
             data["turnover_yi"] = round(total / 1e8, 2)
             pred = _predict_turnover_model_or_linear(total)
             data["turnover_pred_yi"] = round(pred / 1e8, 2) if pred else None
+            # 较上日变化：今日成交额 - 上一交易日同时段累计成交额（需求）
+            data["turnover_vs_prev"] = _turnover_vs_prev_yi(total)
         data["sources"] = {"新浪": True}
     except Exception as e:  # noqa: BLE001
         data["errors"].append("新浪行情：%s" % e)
     return data
+
+
+def _turnover_vs_prev_yi(amount_yuan):
+    """较上一交易日同时段变化（亿元）：今日累计成交额 - 上一交易日同一分钟累计成交额。
+
+    用腾讯 day/query 上一交易日分时曲线，按当前已交易分钟取累计值；
+    数据不足返回 None。
+    """
+    try:
+        el = elapsed_trade_minutes()
+        if el <= 0:
+            return None
+        prev = None
+        curves = _tx_intraday_curves(5)
+        days = sorted(curves.keys())
+        if not days:
+            return None
+        prev_day = days[-1]
+        pts = curves[prev_day]
+        prev_cum = None
+        for m, cum in pts:
+            if m <= el:
+                prev_cum = cum
+            else:
+                break
+        if prev_cum:
+            prev = round((amount_yuan - prev_cum) / 1e8, 2)
+        return prev
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _predict_turnover_model_or_linear(total):
@@ -626,6 +688,22 @@ def _sec_hist_wti():
     return data
 
 
+def _sec_week_news():
+    """四、本周重大关注：新浪 7x24 快讯 ≤5 条（主题全文 + 隐式链接）。"""
+    sess = _session()
+    data = {"errors": []}
+    try:
+        text = _get_text(sess, SINA_7X24, params={
+            "page": "1", "page_size": "10", "zhibo_id": "152",
+            "tag_id": "0", "dire": "f", "dpc": "1"},
+            headers={"Referer": "https://finance.sina.com.cn/"})
+        data["news"] = parse_sina_7x24(text)
+        data["sources"] = {"新浪": True}
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("本周关注：%s" % e)
+    return data
+
+
 _SECTIONS = [
     ("live_sina", _sec_live_sina),
     ("live_median", _sec_live_median),
@@ -633,6 +711,7 @@ _SECTIONS = [
     ("hist_ccpr", _sec_hist_ccpr),
     ("hist_xau", _sec_hist_xau),
     ("hist_wti", _sec_hist_wti),
+    ("week_news", _sec_week_news),
 ]
 
 _LIVE_KEYS = {"live_sina", "live_median"}
@@ -649,6 +728,8 @@ def _merge_section(out, key, data):
             live["turnover_yi"] = data["turnover_yi"]
         if data.get("turnover_pred_yi") is not None:
             live["turnover_pred_yi"] = data["turnover_pred_yi"]
+        if data.get("turnover_vs_prev") is not None:
+            live["turnover_vs_prev"] = data["turnover_vs_prev"]
     elif key == "live_median":
         live["csi300_median"] = data.get("csi300_median")
         live["hs300_median_pe"] = data.get("hs300_median_pe")
@@ -660,6 +741,8 @@ def _merge_section(out, key, data):
         hist["xau"] = data.get("xau", [])
     elif key == "hist_wti":
         hist["wti"] = data.get("wti", [])
+    elif key == "week_news":
+        hist["news"] = data.get("news", [])
     for e in data.get("errors", []):
         (live["errors"] if key in _LIVE_KEYS else hist["errors"]).append(e)
     for s, v in (data.get("sources") or {}).items():
@@ -670,9 +753,10 @@ def _new_state():
     return {
         "ok": True, "ts": _cn_now().strftime("%H:%M:%S"), "sources": {},
         "live": {"quotes": [], "turnover_yi": None, "turnover_pred_yi": None,
+                 "turnover_vs_prev": None,
                  "csi300_median": None, "hs300_median_pe": None, "errors": []},
         "history": {"turnover": [], "ccpr": [], "wti": [], "xau": [],
-                    "errors": []},
+                    "news": [], "errors": []},
     }
 
 

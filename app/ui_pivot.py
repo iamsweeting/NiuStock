@@ -34,10 +34,11 @@ _BLUE = get_color_from_hex("#64b5f6")
 _ORANGE = get_color_from_hex("#ffa726")
 _YELLOW = get_color_from_hex("#ffd54f")
 _GREY = (0.72, 0.74, 0.78, 1.0)
-_BG_BEST = (0.35, 0.12, 0.12, 0.9)     # 红底（最优误差≤1%）
-_BG_2ND = (0.32, 0.20, 0.06, 0.9)      # 橙底（次优误差≤2%）
-_BG_GREEN = (0.08, 0.28, 0.14, 0.9)    # 绿底
-_BG_YELLOW = (0.30, 0.26, 0.06, 0.9)   # 黄底
+# 需求：最优/次优背景区分度加强——最优红底更亮、次优橙底更暗更偏棕
+_BG_BEST = (0.55, 0.10, 0.10, 0.95)      # 红底（最优误差≤0.5%）
+_BG_2ND = (0.42, 0.22, 0.02, 0.92)       # 橙底（次优误差≤1%）
+_BG_GREEN = (0.08, 0.28, 0.14, 0.9)      # 绿底
+_BG_YELLOW = (0.30, 0.26, 0.06, 0.9)     # 黄底
 _BG_NONE = (0.0, 0.0, 0.0, 0.0)
 
 MODE_DAILY = "daily"
@@ -221,17 +222,20 @@ class PivotPage:
             orientation="horizontal", size_hint_y=None, height=dp(30), spacing=dp(8),
         )
         # 需求：字体不宜过大，数字大时保持单行（恒生/茅台等大数值不换行，
-        # 避免覆盖上方"验证："文字）。用固定小字号 + 一次性 text_size 裁剪，
-        # 不做 width/size 动态绑定（Adreno 上回调链易触发递归崩溃）。
-        self.v_high = MDLabel(text="最高 —", size_hint_x=1, adaptive_height=True,
-                              theme_text_color="Custom", text_color=_RED, valign="middle",
-                              font_size=dp(11))
-        self.v_low = MDLabel(text="最低 —", size_hint_x=1, adaptive_height=True,
-                             theme_text_color="Custom", text_color=_GREEN, valign="middle",
-                             font_size=dp(11))
-        self.v_close = MDLabel(text="收盘 —", size_hint_x=1, adaptive_height=True,
-                               theme_text_color="Custom", text_color=(1, 1, 1, 1), valign="middle",
-                               font_size=dp(11))
+        # 避免覆盖上方"验证："文字）。固定行高 + 单元格填满 + 单次 text_size 限宽，
+        # 不做动态字号绑定（Adreno 上回调链易触发切换崩溃）。
+        self.v_high = MDLabel(text="最高 —", size_hint_x=1, size_hint_y=1,
+                              theme_text_color="Custom", text_color=_RED,
+                              halign="left", valign="middle", font_size=dp(11))
+        self.v_low = MDLabel(text="最低 —", size_hint_x=1, size_hint_y=1,
+                             theme_text_color="Custom", text_color=_GREEN,
+                             halign="left", valign="middle", font_size=dp(11))
+        self.v_close = MDLabel(text="收盘 —", size_hint_x=1, size_hint_y=1,
+                               theme_text_color="Custom", text_color=(1, 1, 1, 1),
+                               halign="left", valign="middle", font_size=dp(11))
+        # 单行限宽：text_size 双向固定 → 超长自动截断不换行（同 _Cell 稳定模式）
+        for _lb in (self.v_high, self.v_low, self.v_close):
+            _lb.bind(size=lambda o, *a: setattr(o, "text_size", (o.width, o.height)))
         vrow.add_widget(self.v_high)
         vrow.add_widget(self.v_low)
         vrow.add_widget(self.v_close)

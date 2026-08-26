@@ -312,17 +312,23 @@ def parse_batch_codes(text):
 
 
 # ---------------------------------------------------------------------------
-# 验证标色（纯函数）：下一交易日/周验证，误差 ≤1% 标红(R)/绿(S)，≤2% 标橙/黄
+# 验证标色（纯函数）：下一交易日/周验证，误差 ≤0.5% 标红(R)/绿(S)，≤1% 标橙/黄
 # ---------------------------------------------------------------------------
 
 _ALGO_KEYS = (("经典", "经典"), ("斐波", "斐波那契"), ("卡玛", "卡玛利亚"),
               ("伍迪", "伍迪"), ("迪马克", "迪马克"))
+
+# 需求：最优误差从 1% 提升到 0.5%，次优从 2% 提升到 1%
+VERIFY_BEST_EPS = 0.005      # 最优（红/绿）
+VERIFY_SECOND_EPS = 0.01     # 次优（橙/黄）
+VERIFY_TIE_EPS = 0.001       # 并列判定容差
 
 
 def mark_verify_levels(blocks, verify_high=None, verify_low=None):
     """返回 (best_r, best_s)：best_r = {"red": set((key,lvl)), "orange": set(...)}。
 
     R 系列与验证最高价比较、S 系列与验证最低价比较；PP 不参与比较。
+    最优误差 ≤0.5% 标红/绿，次优误差 ≤1% 标橙/黄（需求：1%→0.5%、2%→1%）。
     """
     best_r = {"red": set(), "orange": set()}
     best_s = {"green": set(), "yellow": set()}
@@ -343,7 +349,7 @@ def mark_verify_levels(blocks, verify_high=None, verify_low=None):
                         pass
         return out
 
-    def _mark(items, target, near_set, far_set, near_color, far_color):
+    def _mark(items, target, near_set, far_set):
         if target is None or target <= 0:
             return
         scored = []
@@ -353,32 +359,32 @@ def mark_verify_levels(blocks, verify_high=None, verify_low=None):
             return
         scored.sort(key=lambda x: x[0])
         best_err = scored[0][0]
-        if best_err > 0.02:
+        if best_err > VERIFY_BEST_EPS:
             return
         for pct, dk, lv in scored:
-            if abs(pct - best_err) < 0.001:
+            if abs(pct - best_err) < VERIFY_TIE_EPS:
                 near_set.add((dk, lv))
             else:
                 break
-        # 次优：仅当最优误差≤2%时，次优误差≤2%标远色
+        # 次优：最优误差达标后，次优误差 ≤1% 标远色
         if len(scored) > 1:
             second_start = 0
             for i, (pct, dk, lv) in enumerate(scored):
-                if abs(pct - best_err) >= 0.001:
+                if abs(pct - best_err) >= VERIFY_TIE_EPS:
                     second_start = i
                     break
             if 0 < second_start < len(scored):
                 second_err = scored[second_start][0]
-                if second_err <= 0.02:
+                if second_err <= VERIFY_SECOND_EPS:
                     for i in range(second_start, len(scored)):
                         pct, dk, lv = scored[i]
-                        if abs(pct - second_err) < 0.001:
+                        if abs(pct - second_err) < VERIFY_TIE_EPS:
                             far_set.add((dk, lv))
                         else:
                             break
 
-    _mark(_collect("R"), verify_high, best_r["red"], best_r["orange"], "red", "orange")
-    _mark(_collect("S"), verify_low, best_s["green"], best_s["yellow"], "green", "yellow")
+    _mark(_collect("R"), verify_high, best_r["red"], best_r["orange"])
+    _mark(_collect("S"), verify_low, best_s["green"], best_s["yellow"])
     return best_r, best_s
 
 

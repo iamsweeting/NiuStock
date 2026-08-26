@@ -162,7 +162,8 @@ class BatchPage:
         box.add_widget(self.results_box)
 
         box.add_widget(MDLabel(
-            text="代码支持：600519 / sz159516 / HSTECH 等（每行一个，可用逗号/空格分隔）\n"
+            text="代码支持：600519 / sz159516 / HSTECH 等\n"
+                 "（每行一个，可用逗号/空格分隔）\n"
                  "统一数据源：腾讯财经（默认）→ 新浪财经（备用）\n"
                  "点击单元格复制，底部可一键复制全部结果\n"
                  "指标仅供技术分析参考，不构成投资建议",

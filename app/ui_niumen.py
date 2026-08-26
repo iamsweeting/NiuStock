@@ -78,6 +78,8 @@ class NiumenPage:
         box.add_widget(self.version_row)
         self._build_values_card(box)
         self._build_judgment_card(box)
+        # 本页最下方：操作规则标注 + 免责声明（需求）
+        self._build_rules_card(box)
 
     def _build_search(self, box):
         row = MDBoxLayout(
@@ -339,8 +341,9 @@ class NiumenPage:
             text="结构判断：—", font_style="H6", adaptive_height=True,
             theme_text_color="Custom", text_color=config.COLOR_UP,
         )
+        # 需求：操作建议字体缩小（与规则段落呼应）
         self.advice_label = MDLabel(
-            text="操作建议：—", font_style="H6", adaptive_height=True,
+            text="操作建议：—", font_style="Subtitle1", adaptive_height=True,
             theme_text_color="Custom", text_color=config.COLOR_UP,
         )
         self.stage_label = MDLabel(text="阶段：—", font_style="Subtitle1", adaptive_height=True)
@@ -358,6 +361,37 @@ class NiumenPage:
         self.judgment_card.add_widget(self.summary_label)
         self.judgment_card.add_widget(self.levels_label)
         box.add_widget(self.judgment_card)
+
+    def _build_rules_card(self, box):
+        """本页最下方：操作规则标注（每个规则独立段落，小字）+ 免责声明（需求）。"""
+        self.rules_card = MDCard(
+            orientation="vertical",
+            padding=CARD_PADDING, spacing=dp(3),
+            radius=CARD_RADIUS, elevation=0, size_hint_y=None,
+        )
+        self.rules_card.bind(minimum_height=self.rules_card.setter("height"))
+        self.rules_card.add_widget(MDLabel(
+            text="操作规则", font_style="Subtitle2", bold=True,
+            theme_text_color="Custom", text_color=get_color_from_hex("#8ab4f8"),
+            adaptive_height=True,
+        ))
+        rules = [
+            "规则1 追上涨：柱状线实体与 YLX 产生分离后，首次接触 YLX 可考虑进入 15% 总额试仓；但出现红三兵、下锤线、个股与板块/大盘/行业趋势相背离时不要追。",
+            "规则2 拿成本：大幅跌破 20/60 成本线可考虑收集成本，每次最多增加 25% 总额。",
+            "规则3 快卖出：突破止盈线卖出，并结合其它趋势判断卖出额度。",
+        ]
+        for r in rules:
+            self.rules_card.add_widget(MDLabel(
+                text=r, font_style="Caption",
+                theme_text_color="Secondary", adaptive_height=True,
+            ))
+        self.rules_card.add_widget(MDSeparator())
+        self.rules_card.add_widget(MDLabel(
+            text="免责声明：本页指标与规则仅供技术分析参考，不构成任何投资建议；"
+                 "股市有风险，入市需谨慎，据此操作盈亏自负。",
+            font_style="Caption", theme_text_color="Hint", adaptive_height=True,
+        ))
+        box.add_widget(self.rules_card)
 
     # 注：原"自选名单"历史卡已按需求删除；查询记录仍会写入 watchlist
     # （供快捷按钮前3个与批量页"近期查询"按钮使用），长按快捷按钮可移除单条。

@@ -126,8 +126,23 @@ def test_mark_verify_levels_red_green():
     best_r, best_s = pivot.mark_verify_levels(blocks, verify_high=110.0, verify_low=90.0)
     assert ("经典", "R1") in best_r["red"]
     assert ("经典", "S1") in best_s["green"]
-    # 次优（误差≤2%）标橙/黄：经典 R2=120 与 110 相差约 9% > 2%，不标
+    # 次优（误差≤1%）标橙/黄：经典 R2=120 与 110 相差约 9% > 1%，不标
     assert ("经典", "R2") not in best_r["orange"]
+
+
+def test_mark_verify_levels_thresholds_0p5_and_1pct():
+    # 需求：最优 1%→0.5%、次优 2%→1%
+    assert pivot.VERIFY_BEST_EPS == 0.005
+    assert pivot.VERIFY_SECOND_EPS == 0.01
+    high, low, close = 110, 90, 100
+    blocks = pivot.compute_pivot_blocks(high, low, close, 100)
+    # 0.8% 误差：>0.5% 且 <1% → 既不是最优红，也不会触发标色（最优不达标直接返回）
+    best_r, _ = pivot.mark_verify_levels(blocks, verify_high=110.9, verify_low=None)
+    assert ("经典", "R1") not in best_r["red"]
+    assert ("经典", "R1") not in best_r["orange"]
+    # 0.5% 以内（如 110.5，误差 0.45%）→ 标最优红
+    best_r2, _ = pivot.mark_verify_levels(blocks, verify_high=110.5, verify_low=None)
+    assert ("经典", "R1") in best_r2["red"]
 
 
 def test_mark_verify_levels_no_target():
@@ -147,7 +162,7 @@ def test_config_pivot_constants():
     assert config.PIVOT_SOURCE_CHAIN[0] == config.SOURCE_TENCENT
     assert config.PIVOT_SOURCE_CHAIN[1] == config.SOURCE_SINA
     assert len(config.PIVOT_ALGORITHMS) == 5
-    assert config.DISPLAY_POINTS == 10
+    assert config.DISPLAY_POINTS == 21
     # 默认名单：159516 第一、688008 第二、513310 第三（需求）
     assert config.DEFAULT_WATCHLIST[0]["code"] == "sz159516"
     assert config.DEFAULT_WATCHLIST[1]["code"] == "sh688008"

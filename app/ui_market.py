@@ -90,7 +90,7 @@ class MarketPage:
         )
         box.add_widget(self.hist_box)
 
-        # 三、沪深300中位数（置于本页最后）
+        # 三、沪深300中位数
         box.add_widget(self._title("三、沪深300中位数"))
         self.median_card = self._make_card()
         self.median_label = MDLabel(
@@ -99,11 +99,33 @@ class MarketPage:
         self.median_card.add_widget(self.median_label)
         box.add_widget(self.median_card)
 
+        # 四、本周重大关注（消息主题直接可见，点标题打开详情链接，需求）
+        box.add_widget(self._title("四、本周重大关注"))
+        self.news_card = self._make_card()
+        self.news_label = MDLabel(
+            text="查询中…", markup=True, font_style="Body2",
+            adaptive_height=True, theme_text_color="Custom", text_color=_GREY,
+        )
+        self.news_label.bind(on_ref_press=self._open_news_link)
+        self.news_card.add_widget(self.news_label)
+        box.add_widget(self.news_card)
+
         self.error_label = MDLabel(
             text="", markup=True, font_style="Caption",
             theme_text_color="Custom", text_color=_HINT, adaptive_height=True,
         )
         box.add_widget(self.error_label)
+
+    @staticmethod
+    def _open_news_link(instance, ref):
+        """点击新闻标题 → 打开详情链接（隐式链接，不显示网址）。"""
+        try:
+            import webbrowser
+            url = ref
+            if url and url.startswith("http"):
+                webbrowser.open(url)
+        except Exception:  # noqa: BLE001
+            pass
 
     @staticmethod
     def _title(text):
@@ -178,6 +200,7 @@ class MarketPage:
         self.ts_label.text = "更新于：刷新中…"
         self.turnover_label.text = "两市成交额：查询中…"
         self.median_label.text = "沪深300中位数：查询中…"
+        self.news_label.text = "查询中…"
 
         # 指数/品种表格：表头 + 占位行
         self.quotes_box.clear_widgets()
@@ -185,11 +208,15 @@ class MarketPage:
             ("名称", 0.46), ("最新", 0.30), ("涨跌%", 0.24)]))
         self.quotes_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
 
-        # 历史：四个小节各自「标题 + 占位行」
+        # 历史：各小节「标题 + 占位行」（大宗商品合并为一张表）
         self.hist_box.clear_widgets()
-        for title in _HIST_TITLES:
+        for fk, title in _HIST_TITLES.items():
+            if fk == "wti" or fk == "xau":
+                continue
             self.hist_box.add_widget(self._hist_title(title))
             self.hist_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
+        self.hist_box.add_widget(self._hist_title("大宗商品：伦敦金 / WTI原油 / 金油比"))
+        self.hist_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
         self.error_label.text = ""
 
     # ------------------------------------------------------------------
@@ -207,6 +234,8 @@ class MarketPage:
                 self._render_quotes()
             elif key == "live_median":
                 self._render_median(data)
+            elif key == "week_news":
+                self._render_news(data.get("news", []))
             elif key in _SECTION_TO_FIELD:
                 field = _SECTION_TO_FIELD[key]
                 self._render_hist_field(field, data.get(field, []))
@@ -226,9 +255,10 @@ class MarketPage:
                                  if errs else "")
 
     def _render_turnover(self, live):
-        # 两市成交额（首行）+ 本日预测额（另起一行，需求）
+        # 两市成交额（首行）+ 本日预测额（另起一行，需求）+ 较上日变化
         t = live.get("turnover_yi")
         p = live.get("turnover_pred_yi")
+        vp = live.get("turnover_vs_prev")
         lines = []
         if t:
             lines.append("两市成交额：[color=%s]%.0f[/color] 亿" % (_hex(_RED), t))
@@ -239,6 +269,10 @@ class MarketPage:
                          % (_hex(_GREEN), p, int(market.elapsed_trade_minutes())))
         elif t:
             lines.append("本日预测额：—")
+        if vp is not None and t:
+            vc = _GREEN if vp >= 0 else _RED
+            lines.append("较上日变化：[color=%s]%+.0f[/color] 亿"
+                         % (_hex(vc), vp))
         self.turnover_label.text = "\n".join(lines)
 
     def _render_quotes(self, quotes=None):
@@ -269,16 +303,64 @@ class MarketPage:
             med_parts.append("中位数PE(TTM)：%s（乐咕乐股）" % ("%.2f" % pe if pe else "—"))
         self.median_label.text = "  ·  ".join(med_parts)
 
+    def _render_news(self, news):
+        """本周重大关注：每条一行「时间 主题」（点标题打开详情，隐式链接）。
+
+        news: [(create_time, rich_text, docurl)]，主题全文直接可见（需求）。
+        """
+        if not news:
+            self.news_label.text = "暂无重大消息"
+            return
+        lines = []
+        for ct, text, url in news:
+            # 主题全文 + 隐式链接：仅在有点击动作时打开，不显示网址
+            if url and url.startswith("http"):
+                lines.append("[ref=%s][color=%s]● %s[/color][/ref]  %s"
+                             % (url, _hex(_HIST_TITLE_COLOR), ct[5:], text))
+            else:
+                lines.append("[color=%s]● %s[/color]  %s"
+                             % (_hex(_HIST_TITLE_COLOR), ct[5:], text))
+        self.news_label.text = "\n".join(lines)
+
     def _render_hist_field(self, key, rows):
-        """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。"""
+        """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。
+
+        伦敦金与 WTI 合并为一张"大宗商品"表，并按日计算金油比（需求）。
+        """
         # 重建整个历史区（小节少、行数少，重建代价可忽略）
         fields = {k: self._hist_rows.get(k, []) for k in _HIST_FIELDS}
         fields[key] = rows
         self._hist_rows = fields
         self.hist_box.clear_widgets()
         for fk in _HIST_FIELDS:
+            if fk == "wti" or fk == "xau":
+                # 伦敦金/WTI/金油比 合并成一张表（只在两者都到齐后渲染）
+                continue
             self._hist_section(_HIST_TITLES[fk], fields[fk],
                                fmt=_HIST_FMT[fk])
+        self._render_commodity_table(fields["xau"], fields["wti"])
+
+    def _render_commodity_table(self, xau_rows, wti_rows):
+        """大宗商品表：日期 | 伦敦金 | WTI原油 | 金油比（金/油，单位一致换算为桶/盎司）。"""
+        self.hist_box.add_widget(self._hist_title("大宗商品：伦敦金 / WTI原油 / 金油比"))
+        xmap = dict(xau_rows)
+        wmap = dict(wti_rows)
+        dates = sorted(set(xmap) & set(wmap))[-5:]
+        if not dates:
+            self.hist_box.add_widget(self._row([("暂无数据", _HINT, 1.0)]))
+            return
+        self.hist_box.add_widget(self._head_row([
+            ("日期", 0.28), ("伦敦金", 0.26), ("WTI", 0.22), ("金油比", 0.24)]))
+        for d in dates:
+            g, w = xmap[d], wmap[d]
+            # 金油比：一盎司黄金可换多少桶原油（金价美元/盎司 ÷ 油价美元/桶）
+            ratio = g / w if w else None
+            self.hist_box.add_widget(self._row([
+                (d[5:] if len(d) > 5 else d, _GREY, 0.28),
+                ("%.1f" % g, _WHITE, 0.26),
+                ("%.2f" % w, _WHITE, 0.22),
+                ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.24),
+            ]))
 
     def _hist_title(self, text):
         # 历史小节标题：不小于数值行字号（Body2），浅蓝区分（需求）
