@@ -22,12 +22,15 @@ def test_default_items_when_missing(tmp_path):
     assert _codes(wl) == ["sz159516", "sh688008", "sh513310"]
 
 
-def test_touch_counts_and_keeps_default_order(tmp_path):
+def test_touch_counts_and_tail_free_order(tmp_path):
+    # 前两名有门槛；第3名及以后无门槛（count 高 1 即上升）。
+    # 默认第三名 513310 count=0，600519 查询 2 次（count=2）即占据第3名。
     wl = _wl(tmp_path)
     wl.touch("sh600519", "贵州茅台")
     wl.touch("sh600519", "贵州茅台")
-    # 新代码排最后；默认前三不受两次查询影响（阈值 30/50）
-    assert _codes(wl) == ["sz159516", "sh688008", "sh513310", "sh600519"]
+    codes = _codes(wl)
+    assert codes[:2] == ["sz159516", "sh688008"]     # 前两名门槛保护，未动
+    assert codes[2] == "sh600519"                    # 第3名无门槛：count 2 > 0
     it = [i for i in wl.items() if i["code"] == "sh600519"][0]
     assert it["count"] == 2
 
@@ -76,16 +79,16 @@ def test_no_cascade_single_step_per_touch(tmp_path):
 
 
 def test_tail_sorted_pure_count(tmp_path):
-    # 第4名以后：纯按 count 降序（不设门槛）
+    # 第3名及以后：无门槛，纯按 count 降序（多 1 次即可上升）
     wl = _wl(tmp_path)
     wl.touch("sh600519", "贵州茅台")     # count 1
     wl.touch("sz000001", "平安银行")     # count 1
     wl.touch("sz300750", "宁德时代")     # count 1
-    wl.touch("sh600519", "贵州茅台")     # count 2 → 尾部第一
+    wl.touch("sh600519", "贵州茅台")     # count 2 → 占据第3名
     codes = _codes(wl)
-    assert codes[:3] == ["sz159516", "sh688008", "sh513310"]
-    assert codes[3] == "sh600519"        # count 2 在 count 1 之前
-    assert set(codes[4:]) == {"sz000001", "sz300750"}
+    assert codes[:2] == ["sz159516", "sh688008"]
+    assert codes[2] == "sh600519"        # count 2 → 第3名（无门槛）
+    assert set(codes[3:]) == {"sz000001", "sz300750", "sh513310"}
 
 
 def test_rank_persists(tmp_path):

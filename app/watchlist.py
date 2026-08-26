@@ -110,32 +110,30 @@ class Watchlist:
 
     def _rank(self, items, touched_code):
         """排序：
-        1) 第4名以后纯按 count 降序；
-        2) 前三名门槛保护：被触摸项最多升一位（无级联）；
-           无触摸对象（加载时）只做一次逐对门槛检查。
+        1) 第3名及以后（含第3名）：无门槛，纯按 count 降序（多 1 次即可上升）；
+        2) 前两名门槛保护：升入第1名需比现第1名多 +30，升入第2名需比现第2名多 +50；
+           每次触摸最多升一位（无级联）。
         """
         items = list(items)
-        # 1) 尾部（第4名以后）纯 count 降序
-        if len(items) > 3:
-            head, tail = items[:3], items[3:]
+        # 1) 第3名及以后：纯 count 降序（默认前三中的第三名同样参与，无门槛）
+        if len(items) > 2:
+            head, tail = items[:2], items[2:]
             tail.sort(key=lambda it: it["count"], reverse=True)
             items = head + tail
-        # 2) 前三名门槛升级
+        # 2) 前两名门槛
         if touched_code is None:
-            # 加载：按固定顺序逐对检查，最多移动一位（防止旧数据整体重排抖动）
-            for i in (2, 1):
-                if len(items) > i + 1:
-                    need = self._promote_threshold(i)
-                    if items[i + 1]["count"] - items[i]["count"] >= need:
-                        items[i], items[i + 1] = items[i + 1], items[i]
-                        break
+            # 加载：逐对检查一次（3→2 需 +50；2→1 需 +30）
+            if len(items) > 2 and items[2]["count"] - items[1]["count"] >= self._promote_threshold(1):
+                items[1], items[2] = items[2], items[1]
+            if len(items) > 1 and items[1]["count"] - items[0]["count"] >= self._promote_threshold(0):
+                items[0], items[1] = items[1], items[0]
             return items
         idx = next((i for i, it in enumerate(items) if it["code"] == touched_code), -1)
-        if 1 <= idx <= 3:
-            above = items[idx - 1]
-            need = self._promote_threshold(idx - 1)
-            if items[idx]["count"] - above["count"] >= need:
-                items[idx - 1], items[idx] = items[idx], items[idx - 1]
+        # 触摸对象：最多升一位（只可能跨前两名门槛）
+        if idx == 2 and items[2]["count"] - items[1]["count"] >= self._promote_threshold(1):
+            items[1], items[2] = items[2], items[1]
+        elif idx == 1 and items[1]["count"] - items[0]["count"] >= self._promote_threshold(0):
+            items[0], items[1] = items[1], items[0]
         return items
 
     # ------------------------------------------------------------------
