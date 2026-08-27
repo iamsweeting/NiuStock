@@ -15,8 +15,8 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,otf,ttf,txt,json,md
 source.exclude_dirs = tests,.github,.buildozer,bin,tools,__pycache__,p4a-recipes
 
-# 版本
-version = 1.0.0
+# 版本（用户确认发布版本 1.5）
+version = 1.5
 
 # Python 依赖。
 # python3==3.11.5：由 docker_build.sh 动态改写为容器内构建 Python 的确切版本；

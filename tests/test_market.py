@@ -346,3 +346,84 @@ def test_merge_turnover_vs_prev():
     market._merge_section(out, "live_sina", {
         "turnover_yi": 10000.0, "turnover_vs_prev": 123.0, "errors": []})
     assert out["live"]["turnover_vs_prev"] == 123.0
+
+
+def test_no_break_latin():
+    # 数字/字母与中文边界插入不换行空格，防止 Kivy 在 CJK↔Latin 边界断行
+    assert market._no_break_latin("涨10%后回落") == "涨\u00A010%\u00A0后回落"
+    assert market._no_break_latin("ETF半导体") == "ETF\u00A0半导体"
+    assert market._no_break_latin("半导体ETF大涨") == "半导体\u00A0ETF\u00A0大涨"
+    assert market._no_break_latin("纯中文消息") == "纯中文消息"
+    assert market._no_break_latin("") == ""
+
+
+def test_news_min_score_threshold():
+    # 门槛：至少命中一个重大词(+2)才入选（普通快讯剔除）
+    assert market.WEEK_NEWS_MIN_SCORE == 2
+    assert market._news_score("上证指数收盘微涨") >= 2        # 指数/大盘
+    assert market._news_score("某地天气晴好") < 2              # 无关消息
+    assert market._news_score("半导体板块资金流入") >= 2       # 半导体
+    assert market._news_score("券商股集体走强") >= 2           # 券商
+    # 小额新股仍被剔除
+    assert market._news_score("某公司上市申购募资3亿") < 0
+
+
+def test_parse_sina_7x24_keeps_time_order():
+    # 新需求：最新消息按时间倒序（重大过滤后保持原顺序，不按评分重排）
+    payload = json.dumps({
+        "result": {"data": {"feed": {"list": [
+            {"create_time": "2026-08-27 03:00:00", "rich_text": "英伟达财报出炉",
+             "docurl": ""},
+            {"create_time": "2026-08-27 02:00:00", "rich_text": "央行降准0.5个百分点",
+             "docurl": ""},
+            {"create_time": "2026-08-27 01:00:00", "rich_text": "普通生活新闻",
+             "docurl": ""},
+        ]}}}
+    })
+    news = market.parse_sina_7x24(payload, n=10)
+    texts = [t for _, t, _ in news]
+    assert len(news) == 2
+    assert texts[0] == "英伟达财报出炉"   # 时间最新在前（不因"央行"评分更高而重排）
+    assert texts[1] == "央行降准0.5个百分点"
+    assert "普通生活新闻" not in texts
+
+
+def test_macro_cache_roundtrip(tmp_path):
+    # 缓存读写 + refresh_macro_cached 当天命中（不联网）
+    orig_path = market._macro_cache_path
+    orig_refresh = market.refresh_macro
+    try:
+        market._macro_cache_path = lambda: str(tmp_path / "c.json")
+        state = market._new_macro_state()
+        state["pmi"] = {"months": ["2026-07"], "series": {"PMI": [49.2]}}
+        assert market._save_macro_cache(state) is True
+        cached, cdate = market._load_macro_cache()
+        assert cached is not None
+        assert cached["pmi"]["series"]["PMI"] == [49.2]
+        assert cdate == market._cn_now().strftime("%Y-%m-%d")
+
+        # 缓存日期==今天 → refresh_macro_cached 直接返回缓存（不联网）
+        called = []
+
+        def fake_refresh(on_done=None):
+            called.append(1)
+            s = market._new_macro_state()
+            s["pmi"] = {"months": ["2026-08"], "series": {"PMI": [50.0]}}
+            return s
+
+        market.refresh_macro = fake_refresh
+        out = market.refresh_macro_cached(None, force=False)
+        assert not called
+        assert out["from_cache"] is True
+        assert out["pmi"]["series"]["PMI"] == [49.2]
+
+        # 强制刷新 → 联网并写缓存
+        out2 = market.refresh_macro_cached(None, force=True)
+        assert called
+        assert out2["from_cache"] is False
+        assert out2["pmi"]["series"]["PMI"] == [50.0]
+        cached2, _ = market._load_macro_cache()
+        assert cached2["pmi"]["series"]["PMI"] == [50.0]
+    finally:
+        market._macro_cache_path = orig_path
+        market.refresh_macro = orig_refresh

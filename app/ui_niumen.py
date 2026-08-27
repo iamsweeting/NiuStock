@@ -347,19 +347,10 @@ class NiumenPage:
             theme_text_color="Custom", text_color=config.COLOR_UP,
         )
         self.stage_label = MDLabel(text="阶段：—", font_style="Subtitle1", adaptive_height=True)
-        self.summary_label = MDLabel(
-            text="", markup=True, font_style="Body1",
-            theme_text_color="Secondary", adaptive_height=True,
-        )
-        self.levels_label = MDLabel(
-            text="", markup=True, font_style="Body2", adaptive_height=True,
-        )
+        # 需求：图表/阶段下方的判读明细与价位明细四行无价值，删除
         self.judgment_card.add_widget(self.verdict_label)
         self.judgment_card.add_widget(self.advice_label)
         self.judgment_card.add_widget(self.stage_label)
-        self.judgment_card.add_widget(MDSeparator())
-        self.judgment_card.add_widget(self.summary_label)
-        self.judgment_card.add_widget(self.levels_label)
         box.add_widget(self.judgment_card)
 
     def _build_rules_card(self, box):
@@ -380,11 +371,11 @@ class NiumenPage:
             adaptive_height=True,
         ))
         rules = [
-            "规则1 追上涨：柱状线实体与YLX产生分离后，首次接触YLX可考虑进入"
+            "规则1\u00A0追上涨：柱状线实体与YLX产生分离后，首次接触YLX可考虑进入"
             "15%\u00A0总额试仓；但出现红三兵、下锤线、个股与板块/大盘/行业趋势相背离时不要追。",
-            "规则2 拿成本：大幅跌破20日/60日\u00A0成本线可考虑收集成本，每次最多增加"
+            "规则2\u00A0拿成本：大幅跌破20日/60日\u00A0成本线可考虑收集成本，每次最多增加"
             "25%\u00A0总额。",
-            "规则3 快卖出：突破止盈线卖出，并结合其它趋势判断卖出额度。",
+            "规则3\u00A0快卖出：突破止盈线卖出，并结合其它趋势判断卖出额度。",
         ]
         for r in rules:
             lb = MDLabel(
@@ -468,8 +459,6 @@ class NiumenPage:
         self.name_label.text_color = config.COLOR_DOWN
         self.verdict_label.text = "结构判断：—"
         self.stage_label.text = "阶段：—"
-        self.summary_label.text = ""
-        self.levels_label.text = ""
         self.app.notify_first_load_done()
 
     def open_date_picker(self, *args):
@@ -592,12 +581,3 @@ class NiumenPage:
         self.advice_label.text = "操作建议：%s" % res["advice"]
         self.advice_label.text_color = res["advice_color"]
         self.stage_label.text = "阶段：%s" % res["stage"]
-        self.summary_label.text = res["summary"]
-        # 关键位不再重复数值（数值已在图下方"分析"卡的明细中列出；需求 2）
-        lines = []
-        for kind, label, value, note in res["levels"]:
-            col = LEVEL_KIND_COLORS.get(kind, "#ffffff")
-            lines.append(
-                "[color=%s]●[/color] %s %s %s" % (col, kind, label, note)
-            )
-        self.levels_label.text = "\n".join(lines)

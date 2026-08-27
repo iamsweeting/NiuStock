@@ -99,8 +99,8 @@ class MarketPage:
         self.median_card.add_widget(self.median_label)
         box.add_widget(self.median_card)
 
-        # 四、本周重大关注（消息主题直接可见，点标题打开详情链接，需求）
-        box.add_widget(self._title("四、本周重大关注"))
+        # 四、最新消息（重大：半导体/金融/千亿级，只显示标题，需求）
+        box.add_widget(self._title("四、最新消息"))
         self.news_card = self._make_card()
         self.news_label = MDLabel(
             text="查询中…", markup=True, font_style="Body2",
@@ -208,11 +208,15 @@ class MarketPage:
             ("名称", 0.46), ("最新", 0.30), ("涨跌%", 0.24)]))
         self.quotes_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
 
-        # 历史：各小节「标题 + 占位行」（大宗商品表已移至「宏观数据」tab）
+        # 历史：各小节「标题 + 占位行」（大宗商品合并为一张表）
         self.hist_box.clear_widgets()
         for fk, title in _HIST_TITLES.items():
+            if fk == "wti" or fk == "xau":
+                continue
             self.hist_box.add_widget(self._hist_title(title))
             self.hist_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
+        self.hist_box.add_widget(self._hist_title("大宗商品：伦敦金 / WTI原油 / 金油比"))
+        self.hist_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
         self.error_label.text = ""
 
     # ------------------------------------------------------------------
@@ -302,34 +306,64 @@ class MarketPage:
         self.median_label.text = "  ·  ".join(med_parts)
 
     def _render_news(self, news):
-        """本周重大关注：每条一行「时间 主题」（点标题打开详情，隐式链接）。
+        """最新消息：每条一行「● 标题」（只标题，点击打开详情；数字/字母后不断行）。
 
-        news: [(create_time, rich_text, docurl)]，主题全文直接可见（需求）。
+        news: [(create_time, rich_text, docurl)]。
         """
         if not news:
             self.news_label.text = "暂无重大消息"
             return
         lines = []
-        for ct, text, url in news:
-            # 主题全文 + 隐式链接：仅在有点击动作时打开，不显示网址
+        for _ct, text, url in news:
+            # 数字/字母后不换行：CJK↔Latin 边界插入不换行空格（需求）
+            title = market._no_break_latin(text)
             if url and url.startswith("http"):
-                lines.append("[ref=%s][color=%s]● %s[/color][/ref]  %s"
-                             % (url, _hex(_HIST_TITLE_COLOR), ct[5:], text))
+                lines.append("[ref=%s][color=%s]● %s[/color][/ref]"
+                             % (url, _hex(_HIST_TITLE_COLOR), title))
             else:
-                lines.append("[color=%s]● %s[/color]  %s"
-                             % (_hex(_HIST_TITLE_COLOR), ct[5:], text))
+                lines.append("[color=%s]● %s[/color]"
+                             % (_hex(_HIST_TITLE_COLOR), title))
         self.news_label.text = "\n".join(lines)
 
     def _render_hist_field(self, key, rows):
-        """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。"""
+        """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。
+
+        伦敦金与 WTI 合并为一张"大宗商品"表，并按日计算金油比（需求）。
+        """
         # 重建整个历史区（小节少、行数少，重建代价可忽略）
         fields = {k: self._hist_rows.get(k, []) for k in _HIST_FIELDS}
         fields[key] = rows
         self._hist_rows = fields
         self.hist_box.clear_widgets()
         for fk in _HIST_FIELDS:
+            if fk == "wti" or fk == "xau":
+                # 伦敦金/WTI/金油比 合并成一张表（只在两者都到齐后渲染）
+                continue
             self._hist_section(_HIST_TITLES[fk], fields[fk],
                                fmt=_HIST_FMT[fk])
+        self._render_commodity_table(fields["xau"], fields["wti"])
+
+    def _render_commodity_table(self, xau_rows, wti_rows):
+        """大宗商品表：日期 | 伦敦金 | WTI原油 | 金油比（金/油，单位一致换算为桶/盎司）。"""
+        self.hist_box.add_widget(self._hist_title("大宗商品：伦敦金 / WTI原油 / 金油比"))
+        xmap = dict(xau_rows)
+        wmap = dict(wti_rows)
+        dates = sorted(set(xmap) & set(wmap))[-5:]
+        if not dates:
+            self.hist_box.add_widget(self._row([("暂无数据", _HINT, 1.0)]))
+            return
+        self.hist_box.add_widget(self._head_row([
+            ("日期", 0.28), ("伦敦金", 0.26), ("WTI", 0.22), ("金油比", 0.24)]))
+        for d in dates:
+            g, w = xmap[d], wmap[d]
+            # 金油比：一盎司黄金可换多少桶原油（金价美元/盎司 ÷ 油价美元/桶）
+            ratio = g / w if w else None
+            self.hist_box.add_widget(self._row([
+                (d[5:] if len(d) > 5 else d, _GREY, 0.28),
+                ("%.1f" % g, _WHITE, 0.26),
+                ("%.2f" % w, _WHITE, 0.22),
+                ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.24),
+            ]))
 
     def _hist_title(self, text):
         # 历史小节标题：不小于数值行字号（Body2），浅蓝区分（需求）
@@ -359,16 +393,24 @@ def _hex(col):
 _HIST_TITLES = {
     "turnover": "两市成交额（亿元）",
     "ccpr": "美元兑人民币中间价",
+    "wti": "WTI原油（美元/桶）",
+    "xau": "伦敦金（美元/盎司）",
 }
 _HIST_FIELDS = {
     "turnover": "turnover",
     "ccpr": "ccpr",
+    "wti": "wti",
+    "xau": "xau",
 }
 _SECTION_TO_FIELD = {
     "hist_turnover": "turnover",
     "hist_ccpr": "ccpr",
+    "hist_wti": "wti",
+    "hist_xau": "xau",
 }
 _HIST_FMT = {
     "turnover": lambda v: "%.0f" % v,
     "ccpr": lambda v: "%.4f" % v,
+    "wti": lambda v: "%.2f" % v,
+    "xau": lambda v: "%.2f" % v,
 }

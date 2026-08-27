@@ -2,14 +2,13 @@
 """牛票 · 宏观数据页（「宏观数据」tab）。
 
 需求：
-  1. 查询周期近 12 个月（原 3 个月调整为 12 个月）
-  2. 指标分组：一、PMI及细分  二、通胀  三、流动性  四、资产价格
-     五、大宗商品（近 5 日 伦敦金/WTI/金油比）  六、中美关键指标发布
-  3. 表格含「公式」列；每项指标在数据下方以小字（不超过一行）标明
-     定义/意义/作用（需求补充）
-  4. 派生指标单独底色块展示（经济势能/供需差/备料差/TEC/通胀预期/剪刀差/
-     金比特币/中国实际利率/GDP平减指数）
-布局沿用行情页的固定行高行式表格 + 自适应卡片，避免 Adreno 叠加错乱。
+  1. 月度宏观数据本地缓存：当天已刷新则直接读缓存不联网；手动刷新强制联网
+  2. 中美关键指标发布时间放在最前面（一、）
+  3. 数据按倒序排列（最新在最前）
+  4. 每项指标小字说明：代表含义 + 对经济/股市影响
+  5. 派生指标块固定行高布局（数值行 + 公式/意义行），避免文字叠加
+  6. 大宗商品：近 5 日金油比在行情页；本页提供近 12 个月月均金油比
+布局沿用固定行高行式表格 + 自适应卡片；所有自适应文本绑定 text_size。
 """
 import threading
 import time
@@ -78,7 +77,7 @@ class MacroPage:
         box.add_widget(head)
 
         box.add_widget(MDLabel(
-            text="月度宏观指标（近12个月）· 切换页面时自动刷新",
+            text="月度宏观数据（近12个月）· 当天首次读取后存本地，可手动刷新",
             font_style="Caption", theme_text_color="Hint", adaptive_height=True,
         ))
 
@@ -94,19 +93,14 @@ class MacroPage:
         box.add_widget(self.error_label)
 
     # ------------------------------------------------------------------
-    # 刷新
+    # 刷新（缓存优先：当天已刷新则读本地；手动刷新强制联网）
     # ------------------------------------------------------------------
     def refresh_if_stale(self):
         if time.monotonic() - self._last_refresh >= market.REFRESH_TTL:
-            self.refresh(force=True)
+            self.refresh(force=False)
 
     def refresh(self, force=False):
         if self._busy:
-            return
-        now = time.monotonic()
-        if not force and self._data is not None and \
-                now - self._last_refresh < market.REFRESH_TTL:
-            self.ts_label.text = "更新于：%s（已是最新）" % self._data.get("ts", "—")
             return
         self._busy = True
         self.refresh_btn.disabled = True
@@ -119,32 +113,38 @@ class MacroPage:
             Clock.schedule_once(lambda dt: self._on_done(data), 0)
 
         threading.Thread(
-            target=lambda: market.refresh_macro(on_done), daemon=True).start()
+            target=lambda: market.refresh_macro_cached(on_done, force=force),
+            daemon=True).start()
 
     def _on_done(self, data):
         self._busy = False
         self.refresh_btn.disabled = False
         self._last_refresh = time.monotonic()
         self._data = data
-        self.ts_label.text = "更新于：%s" % data.get("ts", "—")
+        cached = data.get("from_cache")
+        self.ts_label.text = "更新于：%s%s" % (
+            data.get("ts", "—"), "（本地缓存）" if cached else "")
         errs = data.get("errors", [])
         self.error_label.text = ("\n".join("· %s" % e for e in errs[:6])
                                  if errs else "")
         self._render(data)
 
     # ------------------------------------------------------------------
-    # 渲染
+    # 渲染（一、发布时间在最前；数据倒序，最新在前）
     # ------------------------------------------------------------------
     def _render(self, d):
         self.body.clear_widgets()
         box = self.body
 
-        box.add_widget(self._title("一、PMI及细分（近12个月）"))
+        box.add_widget(self._title("一、中美关键指标发布"))
+        self._render_us(d.get("us", []))
+
+        box.add_widget(self._title("二、PMI及细分（近12个月）"))
         pmi = d.get("pmi", {})
         self._render_group(box, pmi.get("months", []), pmi.get("series", {}),
                            _PMI_META, market.derive_macro_pmi(pmi.get("series", {})))
 
-        box.add_widget(self._title("二、通胀（近12个月）"))
+        box.add_widget(self._title("三、通胀（近12个月）"))
         inf = d.get("inflation", {})
         months = inf.get("months", {})
         series = inf.get("series", {})
@@ -163,7 +163,7 @@ class MacroPage:
         self._render_derived(box, market.derive_macro_inflation(series),
                              _DERIVE_META.get("inflation"))
 
-        box.add_widget(self._title("三、流动性（近12个月）"))
+        box.add_widget(self._title("四、流动性（近12个月）"))
         liq = d.get("liquidity", {})
         lmonths = liq.get("months", {})
         lseries = liq.get("series", {})
@@ -178,7 +178,7 @@ class MacroPage:
         self._render_derived(box, market.derive_macro_liquidity(lseries),
                              _DERIVE_META.get("liquidity"))
 
-        box.add_widget(self._title("四、资产价格（近12个月，月末值）"))
+        box.add_widget(self._title("五、资产价格（近12个月，月末值）"))
         ast = d.get("assets", {})
         amonths = ast.get("months", {})
         aseries = ast.get("series", {})
@@ -193,11 +193,8 @@ class MacroPage:
         self._render_derived(box, market.derive_macro_assets(aseries, ast.get("extra", {})),
                              _DERIVE_META.get("assets"), extra_note=ast.get("extra", {}))
 
-        box.add_widget(self._title("五、大宗商品（近5日）"))
-        self._render_commodity(d.get("commodity", {}))
-
-        box.add_widget(self._title("六、中美关键指标发布"))
-        self._render_us(d.get("us", []))
+        box.add_widget(self._title("六、大宗商品（近12个月月均金油比）"))
+        self._render_commodity(d.get("commodity", {}), ast)
 
     def _render_group(self, box, months, series, meta, derived):
         """PMI 组：按 meta 顺序渲染指标块 + 派生块。"""
@@ -208,7 +205,7 @@ class MacroPage:
             self._render_derived(box, derived, _DERIVE_META.get("pmi"))
 
     # ------------------------------------------------------------------
-    # 指标块：名称行 + 公式行 + 意义行（小字单行） + 近12月串
+    # 指标块：名称行 + 公式行 + 意义行 + 近12月串（倒序）
     # ------------------------------------------------------------------
     def _render_series_card(self, box, name, months, values, meta):
         formula, meaning, fmt = meta
@@ -219,46 +216,38 @@ class MacroPage:
         )
         card.bind(minimum_height=card.setter("height"))
 
-        # 名称 + 最新值 + 环比
+        # 名称 + 最新值 + 环比（markup，单行文本）
         line, latest = self._latest_line(name, months, values, fmt)
-        card.add_widget(MDLabel(
+        lb = MDLabel(
             text=line, markup=True, font_style="Body2", bold=True,
             theme_text_color="Custom", text_color=_WHITE, adaptive_height=True,
-        ))
+        )
+        lb.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
+        card.add_widget(lb)
 
         # 公式（小字单行）
         card.add_widget(self._hint_line("公式：%s" % formula))
+        # 定义/意义/作用（小字，自适应换行：代表含义 + 对经济/股市影响）
+        card.add_widget(self._meaning_line(meaning))
 
-        # 定义/意义/作用（小字单行，需求补充）
-        card.add_widget(self._hint_line("意义：%s" % meaning))
-
-        # 近 12 月数值串（自动换行）
+        # 近 12 个月数值（倒序：最新在前，每行 3 个月，需求：删除"近12月："前缀）
         if months and values and latest is not None:
-            parts = []
-            for m, v in zip(months, values):
+            cells = []
+            for i in range(len(months) - 1, -1, -1):
+                v = values[i]
                 if v is None:
                     continue
-                parts.append("%s %s" % (market._month_short(m), fmt(v)))
-            if parts:
+                cells.append("%s %s" % (market._month_short(months[i]), fmt(v)))
+            if cells:
+                rows = ["   ".join(cells[j:j + 3]) for j in range(0, len(cells), 3)]
                 ml = MDLabel(
-                    text="近12月：%s" % " · ".join(parts),
+                    text="\n".join(rows),
                     font_style="Caption", theme_text_color="Custom",
                     text_color=_GREY, adaptive_height=True,
                 )
                 ml.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
                 card.add_widget(ml)
         box.add_widget(card)
-
-    def _hint_line(self, text):
-        """小字说明行：单行（超出省略号省略显示）。"""
-        lb = MDLabel(
-            text=text, font_style="Caption", theme_text_color="Custom",
-            text_color=_HINT, size_hint_y=None, height=dp(18),
-            valign="middle",
-        )
-        # 单行裁剪：size→text_size 单向绑定（不做动态字号，避免 Adreno 回调递归）
-        lb.bind(size=lambda o, *a: setattr(o, "text_size", (o.width, o.height)))
-        return lb
 
     def _latest_line(self, name, months, values, fmt):
         """「名称  最新值  ▲/▼环比」；返回 (markup文本, 最新值)。"""
@@ -284,8 +273,12 @@ class MacroPage:
         return ("[color=%s]%s[/color]  %s%s%s"
                 % (_hex(_WHITE), name, fmt(v), mlabel, diff_txt), v)
 
+    # ------------------------------------------------------------------
+    # 派生块：固定行高（数值行 BoxLayout 无 markup + 公式/意义小字）
+    #   修复：旧实现数值行 markup+adaptive 在 Adreno 上纹理高度异常，
+    #   导致数值不显示、后续行文字叠加（用户实测经济势能/实际利率等块）。
+    # ------------------------------------------------------------------
     def _render_derived(self, box, derived, meta, extra_note=None):
-        """派生指标块：深蓝底色 + 「派生」前缀 + 意义小字。"""
         if not derived:
             return
         card = MDCard(
@@ -300,15 +293,32 @@ class MacroPage:
             m = (meta or {}).get(key, {})
             fmt = m.get("fmt", _FMT_PCT2)
             meaning = m.get("meaning", "")
-            card.add_widget(MDLabel(
-                text="[color=%s]%s[/color]  %s  [color=%s]（派生）[/color]"
-                     % (_hex(_WHITE), key, fmt(v), _hex(_TITLE)),
-                markup=True, font_style="Body2", bold=True,
-                theme_text_color="Custom", text_color=_WHITE, adaptive_height=True,
+            formula = m.get("formula", "")
+            # 数值行：横向 BoxLayout（固定行高，无 markup，杜绝叠加）
+            row = BoxLayout(
+                orientation="horizontal", size_hint_y=None, height=dp(26),
+                spacing=dp(6),
+            )
+            row.add_widget(MDLabel(
+                text=key, font_style="Body2", bold=True, size_hint_x=0.42,
+                theme_text_color="Custom", text_color=_WHITE,
+                halign="left", valign="middle",
             ))
+            row.add_widget(MDLabel(
+                text=fmt(v), font_style="Body2", bold=True, size_hint_x=0.33,
+                theme_text_color="Custom", text_color=_TITLE,
+                halign="left", valign="middle",
+            ))
+            row.add_widget(MDLabel(
+                text="（派生）", font_style="Caption", size_hint_x=0.25,
+                theme_text_color="Custom", text_color=_HINT,
+                halign="left", valign="middle",
+            ))
+            card.add_widget(row)
+            if formula:
+                card.add_widget(self._meaning_line("公式：%s" % formula))
             if meaning:
-                card.add_widget(self._hint_line("公式：%s  ｜  意义：%s"
-                                                % (m.get("formula", ""), meaning)))
+                card.add_widget(self._meaning_line(meaning))
         if extra_note:
             note = []
             if extra_note.get("house_yoy") is not None:
@@ -330,31 +340,56 @@ class MacroPage:
                 card.add_widget(nl)
         box.add_widget(card)
 
-    def _render_commodity(self, com):
-        dates = com.get("dates", [])
-        gold = com.get("gold", [])
-        wti = com.get("wti", [])
-        ratio = com.get("ratio", [])
-        if not dates:
+    def _render_commodity(self, com, ast=None):
+        """六、大宗商品：近 12 个月月末金油比 + 月均金油比。"""
+        # 用资产价格里的伦敦金/WTI 月度序列计算月均金油比
+        gold_m = (ast or {}).get("months", {}).get("gold", [])
+        gold_v = (ast or {}).get("series", {}).get("伦敦金", [])
+        wti_m = (ast or {}).get("months", {}).get("wti", [])
+        wti_v = (ast or {}).get("series", {}).get("WTI", [])
+        gmap = dict(zip(gold_m, gold_v))
+        wmap = dict(zip(wti_m, wti_v))
+        months = sorted(set(gmap) & set(wmap))[-12:][::-1]  # 倒序，最新在前
+        if not months:
             self.body.add_widget(self._card_text("暂无数据"))
             return
+        ratios = []
+        for m in months:
+            g, w = gmap[m], wmap[m]
+            if g and w:
+                ratios.append((m, round(g / w, 1)))
+        if not ratios:
+            self.body.add_widget(self._card_text("暂无数据"))
+            return
+        avg = sum(r for _m, r in ratios) / len(ratios)
         card = MDCard(
             orientation="vertical", padding=[dp(10), dp(6), dp(10), dp(6)],
             radius=_CARD_RADIUS, elevation=0, size_hint_y=None, md_bg_color=_MAIN_BG,
         )
         card.bind(minimum_height=card.setter("height"))
-        card.add_widget(self._head_row([("日期", 0.26), ("伦敦金", 0.24), ("WTI", 0.24), ("金油比", 0.26)]))
-        for i, d in enumerate(dates):
-            r = ratio[i] if i < len(ratio) else None
-            card.add_widget(self._row([
-                (d[5:] if len(d) > 5 else d, _GREY, 0.26),
-                ("%.1f" % gold[i] if i < len(gold) else "—", _WHITE, 0.24),
-                ("%.2f" % wti[i] if i < len(wti) else "—", _WHITE, 0.24),
-                ("%.1f" % r if r else "—", _TITLE, 0.26),
-            ]))
+        card.add_widget(MDLabel(
+            text="月均金油比（伦敦金÷WTI，近12个月）：[color=%s]%.1f[/color]"
+                 % (_hex(_TITLE), avg),
+            markup=True, font_style="Body2", bold=True,
+            theme_text_color="Custom", text_color=_WHITE, adaptive_height=True,
+        ))
+        card.add_widget(self._meaning_line(
+            "含义：一盎司黄金可换原油桶数，反映贵金属/能源比价中枢；比值走阔=避险/抗通胀情绪升温，对股市风险偏好偏空。"))
+        parts = []
+        for m, r in ratios:
+            parts.append("%s %s" % (market._month_short(m), "%.1f" % r))
+        rows = ["   ".join(parts[j:j + 3]) for j in range(0, len(parts), 3)]
+        ml = MDLabel(
+            text="\n".join(rows),
+            font_style="Caption", theme_text_color="Custom",
+            text_color=_GREY, adaptive_height=True,
+        )
+        ml.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
+        card.add_widget(ml)
         self.body.add_widget(card)
 
     def _render_us(self, us):
+        """一、中美关键指标发布（美国发布计划+结果；中国见上方月度表）。"""
         if not us:
             self.body.add_widget(self._card_text("暂无发布日历数据"))
             return
@@ -376,11 +411,9 @@ class MacroPage:
                 (vtxt, _TITLE if val is None else _WHITE, 0.20),
                 (ptxt, _HINT, 0.20),
             ], single_line=True))
-        card.add_widget(MDLabel(
-            text="中国：最近数据期 CPI/PPI/PMI/M1/M2 见上方月度表（发布结果）。",
-            font_style="Caption", theme_text_color="Custom", text_color=_HINT,
-            adaptive_height=True,
-        ))
+        card.add_widget(self._meaning_line(
+            "说明：美国指标显示发布日与今值/前值（待发布=尚未公布）；"
+            "中国 CPI/PPI/PMI/M1/M2 的最近发布结果见下方月度表。"))
         self.body.add_widget(card)
 
     # ------------------------------------------------------------------
@@ -412,6 +445,26 @@ class MacroPage:
             text_color=_HINT, adaptive_height=True,
         )
 
+    def _hint_line(self, text):
+        """小字说明行：单行（超出省略号省略显示）。"""
+        lb = MDLabel(
+            text=text, font_style="Caption", theme_text_color="Custom",
+            text_color=_HINT, size_hint_y=None, height=dp(18),
+            valign="middle",
+        )
+        # 单行裁剪：size→text_size 单向绑定（不做动态字号，避免 Adreno 回调递归）
+        lb.bind(size=lambda o, *a: setattr(o, "text_size", (o.width, o.height)))
+        return lb
+
+    def _meaning_line(self, text):
+        """小字说明行：自适应换行（代表含义/对经济股市影响可较长）。"""
+        lb = MDLabel(
+            text=text, font_style="Caption", theme_text_color="Custom",
+            text_color=_HINT, adaptive_height=True,
+        )
+        lb.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
+        return lb
+
     @staticmethod
     def _row(cells, height=_ROW_H, single_line=False):
         r = BoxLayout(
@@ -438,53 +491,89 @@ def _hex(col):
     return "#%02x%02x%02x" % (int(col[0] * 255), int(col[1] * 255), int(col[2] * 255))
 
 
-# 指标元数据：(公式, 意义/定义/作用, 格式化)
+# 指标元数据：(公式, 意义：代表含义+对经济/股市影响, 格式化)
 _PMI_META = [
-    ("PMI", "官方制造业采购经理指数", "综合制造业景气度，>50扩张 <50收缩", _FMT_PCT1),
-    ("生产", "制造业生产指数", "生产活动扩张/收缩，同步指标", _FMT_PCT1),
-    ("新订单", "制造业新订单指数", "市场需求强弱，领先指标", _FMT_PCT1),
-    ("产成品库存", "制造业产成品库存指数", "库存积压/去化程度", _FMT_PCT1),
-    ("采购量", "制造业采购量指数", "企业原材料采购意愿", _FMT_PCT1),
-    ("原材料库存", "制造业原材料库存指数", "原材料备货水平，补库信号", _FMT_PCT1),
+    ("PMI", "官方制造业采购经理指数",
+     "代表制造业整体景气度，>50扩张、<50收缩；是经济领先指标，回升利好周期股与大盘。", _FMT_PCT1),
+    ("生产", "制造业生产指数",
+     "代表企业生产活动强弱；走高利好制造业盈利预期与顺周期板块。", _FMT_PCT1),
+    ("新订单", "制造业新订单指数",
+     "代表需求端强弱，领先经济约1-3个月；上升利好成长与消费股。", _FMT_PCT1),
+    ("产成品库存", "制造业产成品库存指数",
+     "代表库存积压程度；过高预示去库存压力，对工业品价格与周期股偏空。", _FMT_PCT1),
+    ("采购量", "制造业采购量指数",
+     "代表企业原材料采购意愿；上升预示生产扩张，利好上游资源股。", _FMT_PCT1),
+    ("原材料库存", "制造业原材料库存指数",
+     "代表原材料备货水平；主动补库利好上游，被动累库偏空。", _FMT_PCT1),
 ]
 
 _INFL_META = {
-    "CPI同比": ("全国居民消费价格当月同比", "居民消费价格月度同比，通胀核心指标", _FMT_PCT1),
-    "PPI同比": ("工业品出厂价格当月同比", "生产端出厂价格，企业盈利风向标", _FMT_PCT1),
-    "PPIRM同比": ("工业生产者购进价格同比（上年同月=100换算）", "上游原材料成本压力", _FMT_PCT1),
-    "美国核心PCE": ("美国核心PCE物价指数年率（金十）", "美联储目标通胀，剔除食品能源", _FMT_PCT1),
+    "CPI同比": ("全国居民消费价格当月同比",
+               "代表居民消费物价涨幅，通胀核心指标；温和通胀利好消费股，高通胀压制估值。", _FMT_PCT1),
+    "PPI同比": ("工业品出厂价格当月同比",
+               "代表生产端出厂价格，企业盈利风向标；回升利好周期/工业股，回落利好下游成本。", _FMT_PCT1),
+    "PPIRM同比": ("工业生产者购进价格同比（上年同月=100换算）",
+                 "代表上游原材料成本压力；上行压缩中游毛利，利好资源股，利空加工制造。", _FMT_PCT1),
+    "美国核心PCE": ("美国核心PCE物价指数年率（金十）",
+                   "美联储目标通胀指标，剔除食品能源；高企→加息预期→压制全球成长股与黄金。", _FMT_PCT1),
 }
 
 _LIQ_META = {
-    "M1同比": ("狭义货币(M1)供应量同比", "企业活期资金活跃度，领先经济", _FMT_PCT1),
-    "M2同比": ("广义货币(M2)供应量同比", "货币供应总闸门，总量宽松信号", _FMT_PCT1),
-    "社融增量": ("社会融资规模增量（亿元，商务部）", "实体经济融资总量，信用扩张信号", _FMT_YI),
-    "新增人民币贷款": ("金融机构新增人民币贷款（亿元）", "银行信贷投放，信用脉冲", _FMT_YI),
+    "M1同比": ("狭义货币(M1)供应量同比",
+              "代表企业活期资金活跃度，领先经济与股市约3-6个月；回升利好风险资产。", _FMT_PCT1),
+    "M2同比": ("广义货币(M2)供应量同比",
+              "代表货币供应总量，宽松信号；高增利好资产价格，收紧则承压。", _FMT_PCT1),
+    "社融增量": ("社会融资规模增量（亿元，商务部）",
+                "代表实体经济融资总量，信用扩张信号；放量利好股市与经济周期。", _FMT_YI),
+    "新增人民币贷款": ("金融机构新增人民币贷款（亿元）",
+                     "代表银行信贷投放，信用脉冲；高增预示流动性宽松，利好成长股。", _FMT_YI),
 }
 
 _AST_META = {
-    "伦敦金": ("伦敦金现货（美元/盎司，月末）", "避险资产，美元计价", _FMT_GOLD),
-    "比特币": ("BTC/USDT 收盘（美元，月末，MEXC）", "数字资产，风险偏好指标", _FMT_BTC),
-    "中国10年国债": ("中债10年期国债收益率（%）", "无风险利率基准，资产定价锚", _FMT_PCT3),
-    "1年期LPR": ("贷款市场报价利率 1 年期（%）", "贷款基准利率，政策利率传导", _FMT_PCT2),
+    "伦敦金": ("伦敦金现货（美元/盎司，月末）",
+              "避险资产；金价上涨反映避险/抗通胀情绪，股市风险偏好下降时同涨。", _FMT_GOLD),
+    "比特币": ("BTC/USDT 收盘（美元，月末，MEXC）",
+              "数字资产，风险偏好风向标；上涨代表资金风险偏好提升，利好科技股。", _FMT_BTC),
+    "中国10年国债": ("中债10年期国债收益率（%）",
+                   "无风险利率基准，资产定价锚；上行压制股市估值，下行利好成长。", _FMT_PCT3),
+    "1年期LPR": ("贷款市场报价利率 1 年期（%）",
+                "贷款基准利率，政策利率传导；下调利好地产/成长，上调则承压。", _FMT_PCT2),
 }
 
 _DERIVE_META = {
     "pmi": {
-        "经济势能": {"formula": "新订单−产成品库存", "meaning": "需求与库存背离度，越正越旺", "fmt": _FMT_PCT1},
-        "供需差": {"formula": "生产−新订单", "meaning": "供过于求为负，产出与需求差", "fmt": _FMT_PCT1},
-        "备料差": {"formula": "采购量−原材料库存", "meaning": "主动补库为负，备料意愿", "fmt": _FMT_PCT1},
-        "TEC": {"formula": "Δ新订单−Δ产成品库存", "meaning": "近两期差，经济动能变化", "fmt": _FMT_PCT1},
+        "经济势能": {"formula": "新订单−产成品库存",
+                     "meaning": "代表需求与库存背离度，越正越旺；走高预示补库与生产扩张，利好周期股。",
+                     "fmt": _FMT_PCT1},
+        "供需差": {"formula": "生产−新订单",
+                   "meaning": "代表产出与需求之差，为负=供过于求；走弱预示价格与盈利承压。",
+                   "fmt": _FMT_PCT1},
+        "备料差": {"formula": "采购量−原材料库存",
+                   "meaning": "代表主动补库意愿，为负=主动备料；预示生产扩张，利好上游。",
+                   "fmt": _FMT_PCT1},
+        "TEC": {"formula": "Δ新订单−Δ产成品库存",
+                "meaning": "代表近两期经济动能变化；转正=动能增强，对股市偏多。",
+                "fmt": _FMT_PCT1},
     },
     "inflation": {
-        "通胀预期指数": {"formula": "CPI同比−PPI同比", "meaning": "消费与生产价格差，剪刀差", "fmt": _FMT_PCT1},
+        "通胀预期指数": {"formula": "CPI同比−PPI同比",
+                         "meaning": "代表消费与生产价格剪刀差；走阔=下游利润改善，利好消费股。",
+                         "fmt": _FMT_PCT1},
     },
     "liquidity": {
-        "M1-M2剪刀差": {"formula": "M1同比−M2同比", "meaning": "走阔=资金活化，利好股市", "fmt": _FMT_PCT1},
+        "M1-M2剪刀差": {"formula": "M1同比−M2同比",
+                         "meaning": "代表资金活化度；走阔=企业活钱增加、利于股市，收窄=资金沉淀偏空。",
+                         "fmt": _FMT_PCT1},
     },
     "assets": {
-        "金比特币": {"formula": "伦敦金÷比特币", "meaning": "避险 vs 风险偏好比值", "fmt": _FMT_RATIO},
-        "中国实际利率": {"formula": "1年期LPR−一线新房同比", "meaning": "融资真实成本（房价近通胀）", "fmt": _FMT_PCT1},
-        "GDP平减指数": {"formula": "现价GDP同比−不变价同比", "meaning": "全面价格水平变化", "fmt": _FMT_PCT1},
+        "金比特币": {"formula": "伦敦金÷比特币",
+                     "meaning": "代表避险/风险偏好比值；走高=避险占优，对股市偏空。",
+                     "fmt": _FMT_RATIO},
+        "中国实际利率": {"formula": "1年期LPR−一线新房同比",
+                         "meaning": "代表融资真实成本（房价涨幅近似通胀）；偏高压制投资与估值。",
+                         "fmt": _FMT_PCT1},
+        "GDP平减指数": {"formula": "现价GDP同比−不变价同比",
+                         "meaning": "代表全社会价格水平变化，全面通胀指标；转正=经济回暖价格回升。",
+                         "fmt": _FMT_PCT1},
     },
 }

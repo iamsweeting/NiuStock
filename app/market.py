@@ -17,6 +17,7 @@
   - 腾讯 day/query：两市成交额历史（当日分时末条累计成交额；东方财富 push2his 兜底）
 所有解析函数为纯函数，便于单元测试（不访问网络）。
 """
+import os
 import re
 import threading
 import time
@@ -230,20 +231,28 @@ WEEK_NEWS_PREVIEW = (
     "会议", "决议", "休市", "财报", "业绩预告", "CPI", "PCE", "非农",
     "利率决议", "美联储", "央行", "关税", "发布", "公布", "月", "日",
 )
-# 重大性加分：巨头/千亿级/权重/宏观大事
+# 重大性加分：巨头/千亿级/权重/宏观大事 + 半导体/金融行业重大消息（需求）
 WEEK_NEWS_BIG = (
     "千亿", "万亿", "巨头", "权重", "指数", "大盘", "龙头", "苹果", "微软",
     "英伟达", "台积电", "特斯拉", "亚马逊", "谷歌", "Meta", "茅台", "宁德",
     "比亚迪", "中芯", "华为", "阿里", "腾讯", "平安", "工行", "建行", "中石油",
     "中石化", "联通", "移动", "电信", "中国船舶", "中远", "国家", "国务院",
     "证监会", "央行", "财政部", "商务部", "美联储", "欧央行", "日本央行",
-    "OPEC", "美联储", "非农", "CPI", "PCE", "GDP", "IPO", "上市首日",
+    "OPEC", "非农", "CPI", "PCE", "GDP", "IPO", "上市首日",
+    # 半导体/金融等行业重大消息（需求：关注影响股市的半导体、金融等）
+    "半导体", "芯片", "晶圆", "存储", "光刻", "算力", "AI", "人工智能",
+    "券商", "银行", "保险", "基金", "ETF", "北向", "外资", "机构",
+    "中概", "恒生", "纳指", "标普", "道指", "上市", "中签",
 )
 # 减分/剔除：小额新股、小盘、普通上市（无巨头名）
 WEEK_NEWS_SMALL = (
     "申购", "发行价", "募资", "募", "元/股", "每股", "首发", "北交所",
     "科创板新股", "创业板新股", "小型", "小盘", "次新股",
 )
+
+
+# 过滤门槛：至少命中一个"重大词(+2)"（或两个预告词）才入选，剔除普通快讯
+WEEK_NEWS_MIN_SCORE = 2
 
 
 def _news_score(text):
@@ -261,13 +270,31 @@ def _news_score(text):
     return s
 
 
-def parse_sina_7x24(text, n=5):
-    """解析新浪 7x24 快讯 → 最近 n 条 [(时间, 主题全文, 详情链接)]。
+_NO_BREAK_RE = None
 
-    feed.list 元素：create_time(YYYY-MM-DD HH:MM:SS)、rich_text(消息主题全文)、
-    docurl(详情页链接，可为空)。直接返回主题文本，无需点击链接即可阅读（需求）。
-    过滤策略：优先"即将发生 + 千亿级重大"（评分排序），剔除小额新股；
-    评分不足时回退到最近消息（但剔除小额/无关）。
+
+def _no_break_latin(text):
+    """在 拉丁字母/数字 与 CJK 边界插入不换行空格(\u00A0)。
+
+    需求：标题不要在数字、字母后突然新起一行（Kivy 在 CJK↔Latin 边界可断行）。
+    把 "涨10% "、"ETF 半导体" 等位置的边界字符改为 \u00A0（Kivy 不在此断行）。
+    """
+    global _NO_BREAK_RE
+    if _NO_BREAK_RE is None:
+        _NO_BREAK_RE = re.compile(r"([A-Za-z0-9%.\-+,./$¥])\s*([\u4e00-\u9fff])")
+    out = _NO_BREAK_RE.sub(lambda m: m.group(1) + "\u00A0" + m.group(2), text or "")
+    # 反向：CJK 后紧跟 Latin（如 "指数ETF"）也防断行
+    _NO_BREAK_RE2 = re.compile(r"([\u4e00-\u9fff])\s*([A-Za-z0-9%])")
+    out = _NO_BREAK_RE2.sub(lambda m: m.group(1) + "\u00A0" + m.group(2), out)
+    return out
+
+
+def parse_sina_7x24(text, n=10):
+    """解析新浪 7x24 快讯 → 最近 n 条 [(时间, 主题, 详情链接)]。
+
+    feed 按时间倒序（最新在前）。需求：最新消息 10 条、只标题展示；
+    过滤：评分>0（重大消息：半导体/金融/千亿级/宏观大事），剔除小额新股；
+    保持时间倒序（不按评分重排），取前 n 条。
     """
     import json
     try:
@@ -276,7 +303,7 @@ def parse_sina_7x24(text, n=5):
         items = feed.get("list") if isinstance(feed, dict) else []
     except Exception:
         return []
-    scored = []
+    out = []
     for it in items:
         if not isinstance(it, dict):
             continue
@@ -284,12 +311,12 @@ def parse_sina_7x24(text, n=5):
         rt = str(it.get("rich_text") or "").strip()
         if not rt:
             continue
-        sc = _news_score(rt)
-        if sc <= 0:
+        if _news_score(rt) < WEEK_NEWS_MIN_SCORE:
             continue
-        scored.append((sc, ct, rt, str(it.get("docurl") or "")))
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [(ct, rt, url) for _sc, ct, rt, url in scored[:n]]
+        out.append((ct, rt, str(it.get("docurl") or "")))
+        if len(out) >= n:
+            break
+    return out
 
 
 def parse_yahoo_chart(text):
@@ -756,6 +783,8 @@ _SECTIONS = [
     ("live_median", _sec_live_median),
     ("hist_turnover", _sec_hist_turnover),
     ("hist_ccpr", _sec_hist_ccpr),
+    ("hist_xau", _sec_hist_xau),
+    ("hist_wti", _sec_hist_wti),
     ("week_news", _sec_week_news),
 ]
 
@@ -1181,6 +1210,16 @@ def _sec_macro_assets():
     except Exception as e:  # noqa: BLE001
         data["errors"].append("黄金：%s" % e)
     try:
+        # WTI（近12个月月末值，供月均金油比）
+        text = _get_text(sess, SINA_GLOBAL_KLINE, params={"symbol": "CL"},
+                         headers={"Referer": "https://finance.sina.com.cn/"})
+        out = _monthly_last(parse_sina_global_kline(text, 400))
+        data["months"]["wti"] = [m for m, _v in out]
+        data["series"]["WTI"] = [v for _m, v in out]
+        data["sources"]["新浪"] = True
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("WTI：%s" % e)
+    try:
         text = _get_text(sess, MEXC_KLINE, params={
             "symbol": "BTCUSDT", "interval": "1d", "limit": "400"}, tries=2, pause=0.6)
         out = _monthly_last(parse_mexc_kline(text, 400))
@@ -1335,7 +1374,6 @@ MACRO_SECTIONS = [
     ("macro_liquidity", _sec_macro_liquidity),
     ("macro_assets", _sec_macro_assets),
     ("macro_usdata", _sec_macro_usdata),
-    ("macro_commodity", _sec_macro_commodity),
 ]
 
 
@@ -1399,6 +1437,73 @@ def refresh_macro(on_done=None):
             on_done(out)
         except Exception:  # noqa: BLE001
             pass
+    return out
+
+
+# --------------------------------------------------------------------------
+# 宏观月度数据本地缓存（需求：月度数据不必每次查询）
+#   策略：默认先读本地缓存——当天已刷新过（缓存日期==今天）就直接用缓存，
+#   不联网；缓存日期非今天或首次使用时联网刷新并写缓存；用户手动点"刷新"
+#   按钮强制联网刷新。App 据此按"当日日期 vs 缓存日期"决定是否刷新。
+# --------------------------------------------------------------------------
+
+MACRO_CACHE_NAME = "nstock_macro_cache.json"
+
+
+def _macro_cache_path():
+    base = (os.environ.get("ANDROID_PRIVATE")
+            or os.environ.get("TMP")
+            or os.environ.get("TEMP")
+            or os.getcwd())
+    return os.path.join(base, MACRO_CACHE_NAME)
+
+
+def _load_macro_cache():
+    """读本地缓存 → (state dict, 缓存日期字符串)；无缓存返回 (None, None)。"""
+    try:
+        import json as _json
+        with open(_macro_cache_path(), "r", encoding="utf-8") as f:
+            d = _json.load(f)
+        if not isinstance(d, dict) or "pmi" not in d:
+            return None, None
+        return d, str(d.get("cache_date", ""))
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
+def _save_macro_cache(state):
+    """把宏观状态写入本地缓存（含缓存日期）。"""
+    try:
+        import json as _json
+        d = dict(state)
+        d["cache_date"] = _cn_now().strftime("%Y-%m-%d")
+        with open(_macro_cache_path(), "w", encoding="utf-8") as f:
+            _json.dump(d, f, ensure_ascii=False)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def refresh_macro_cached(on_done=None, force=False):
+    """宏观数据入口：默认读本地缓存（当天有效即不联网）。
+
+    - force=True：忽略缓存强制联网刷新并写缓存（用户手动刷新按钮）
+    - 无缓存或缓存日期 != 今天：联网刷新并写缓存
+    - 缓存日期 == 今天：直接返回缓存（标注 from_cache=True）
+    """
+    if not force:
+        cached, cdate = _load_macro_cache()
+        if cached is not None and cdate == _cn_now().strftime("%Y-%m-%d"):
+            cached["from_cache"] = True
+            if on_done:
+                try:
+                    on_done(cached)
+                except Exception:  # noqa: BLE001
+                    pass
+            return cached
+    out = refresh_macro(on_done)
+    out["from_cache"] = False
+    _save_macro_cache(out)
     return out
 
 

@@ -136,13 +136,19 @@ def test_mark_verify_levels_thresholds_0p5_and_1pct():
     assert pivot.VERIFY_SECOND_EPS == 0.01
     high, low, close = 110, 90, 100
     blocks = pivot.compute_pivot_blocks(high, low, close, 100)
-    # 0.8% 误差：>0.5% 且 <1% → 既不是最优红，也不会触发标色（最优不达标直接返回）
+    # 0.8% 误差（110.9 vs R1=110）：>0.5% 且 <1% → 标次优橙（修复：旧逻辑不标）
     best_r, _ = pivot.mark_verify_levels(blocks, verify_high=110.9, verify_low=None)
     assert ("经典", "R1") not in best_r["red"]
-    assert ("经典", "R1") not in best_r["orange"]
+    assert ("经典", "R1") in best_r["orange"]
     # 0.5% 以内（如 110.5，误差 0.45%）→ 标最优红
     best_r2, _ = pivot.mark_verify_levels(blocks, verify_high=110.5, verify_low=None)
     assert ("经典", "R1") in best_r2["red"]
+    # 用户实测场景：R3=219.82 vs 最高 220.96 → 误差 0.5186% → 标橙
+    blocks2 = [{"title": "经典", "r": {"R1": "200.0", "R2": "210.0", "R3": "219.82"},
+                "s": {"S1": "180.0", "S2": "170.0", "S3": "160.0"}}]
+    best_r3, _ = pivot.mark_verify_levels(blocks2, verify_high=220.96, verify_low=None)
+    assert ("经典", "R3") in best_r3["orange"]
+    assert ("经典", "R3") not in best_r3["red"]
 
 
 def test_mark_verify_levels_no_target():
