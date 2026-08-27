@@ -363,17 +363,19 @@ class MacroPage:
             radius=_CARD_RADIUS, elevation=0, size_hint_y=None, md_bg_color=_MAIN_BG,
         )
         card.bind(minimum_height=card.setter("height"))
-        card.add_widget(self._head_row([("发布日期", 0.30), ("指标", 0.42), ("今值/前值", 0.28)]))
+        card.add_widget(self._head_row(
+            [("发布", 0.22), ("指标", 0.38), ("今值", 0.20), ("前值", 0.20)]))
         for it in us:
             val = it.get("value")
             prev = it.get("prev")
             vtxt = "待发布" if val is None else ("%.2f" % float(val))
-            ptxt = ("前值 %.2f" % float(prev)) if prev not in (None, "") else "—"
+            ptxt = ("%.2f" % float(prev)) if prev not in (None, "") else "—"
             card.add_widget(self._row([
-                (str(it.get("date", ""))[5:], _GREY, 0.30),
-                ("%s" % it.get("name", ""), _WHITE, 0.42),
-                ("%s\n%s" % (vtxt, ptxt), _TITLE if val is None else _WHITE, 0.28),
-            ]))
+                (str(it.get("date", ""))[5:], _GREY, 0.22),
+                (it.get("name", ""), _WHITE, 0.38),
+                (vtxt, _TITLE if val is None else _WHITE, 0.20),
+                (ptxt, _HINT, 0.20),
+            ], single_line=True))
         card.add_widget(MDLabel(
             text="中国：最近数据期 CPI/PPI/PMI/M1/M2 见上方月度表（发布结果）。",
             font_style="Caption", theme_text_color="Custom", text_color=_HINT,
@@ -411,17 +413,21 @@ class MacroPage:
         )
 
     @staticmethod
-    def _row(cells, height=_ROW_H):
+    def _row(cells, height=_ROW_H, single_line=False):
         r = BoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(height),
             spacing=dp(4),
         )
         for text, color, sx in cells:
-            r.add_widget(MDLabel(
+            lb = MDLabel(
                 text=text, adaptive_height=True, size_hint_x=sx,
                 theme_text_color="Custom", text_color=color,
                 halign="left", valign="middle", font_style="Body2",
-            ))
+            )
+            if single_line:
+                # 单行裁剪（长指标名不换行），避免撑高固定行
+                lb.bind(size=lambda o, *a: setattr(o, "text_size", (o.width, o.height)))
+            r.add_widget(lb)
         return r
 
     def _head_row(self, cols):
