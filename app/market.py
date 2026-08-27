@@ -756,8 +756,6 @@ _SECTIONS = [
     ("live_median", _sec_live_median),
     ("hist_turnover", _sec_hist_turnover),
     ("hist_ccpr", _sec_hist_ccpr),
-    ("hist_xau", _sec_hist_xau),
-    ("hist_wti", _sec_hist_wti),
     ("week_news", _sec_week_news),
 ]
 
@@ -845,3 +843,641 @@ def refresh_market_progressive(on_section, on_done=None):
 def refresh_market():
     """刷新大盘信息（并行小节后合并，返回完整 dict）。"""
     return refresh_market_progressive(lambda k, d: None)
+
+
+# ==========================================================================
+# 宏观数据（近 12 个月）—— 「宏观数据」tab
+#   数据源（全部国内可达、低请求量）：
+#     - 国家统计局新站 esData：PMI 及细分、PPIRM、不变价GDP当季值（普通 POST 即可，
+#       无需 curl_cffi 指纹伪装）
+#     - 东方财富 datacenter-web：CPI/PPI（月度）、M1/M2、新增人民币贷款、
+#       中美国债收益率（日）、LPR（月度）、新房价格（月度）、美国关键指标发布日历
+#     - 商务部数据：社会融资规模增量（月度）
+#     - MEXC：比特币日K（币安/OKX/火币在本网络不可达）
+#     - 新浪国际期货日K：伦敦金/WTI（复用）
+#     - 金十 datacenter：美国核心PCE年率（免费层滞后，标注数据月份）
+# ==========================================================================
+
+EM_DC = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+EM_TOKEN = "894050c76af8597a853f5b408b759f5d"
+NBS_ESDATA = "https://data.stats.gov.cn/dg/website/publicrelease/web/external/stream/esData"
+NBS_REF = "https://data.stats.gov.cn/dg/website/page.html#/pc/national/monthData"
+NBS_QREF = "https://data.stats.gov.cn/dg/website/page.html#/pc/national/quarterData"
+NBS_ROOT = "fc982599aa684be7969d7b90b1bd0e84"      # 月度数据
+NBS_QROOT = "a94b8b7365a94874968cabbe392cf679"     # 季度数据
+NBS_PMI_CID = "93ffbb1aa85740d3aa2618371508b606"   # 制造业采购经理指数
+NBS_PMI_IDS = [
+    ("PMI", "a09aa989bdcf4cffa2021795722eb916"),
+    ("生产", "6729aa00f9ed46d8b30c5d2312214b89"),
+    ("新订单", "4151df33b53f4d02ae9f51fe402f1a50"),
+    ("产成品库存", "48ec2904ba8848cf9488fa99d3731525"),
+    ("采购量", "c83954218ae645cf975ed4f66b4a57f2"),
+    ("原材料库存", "c149709d0c48422d83a59d4b94d03bbb"),
+]
+NBS_PPIRM_CID = "50f683df1f8b4da9831b7047d5091571"  # 工业生产者购进价格(上年同月=100)
+NBS_PPIRM_IDS = [("PPIRM", "69b783fe106944bea4ae8db4b413acc8")]
+NBS_GDP_CID = "b676631776424600bdae363df047559f"    # 国内生产总值(不变价)
+NBS_GDP_Q = "b704155cd926437b8ee9c65fe058210d"      # 不变价GDP 当季值(亿元)
+MEXC_KLINE = "https://api.mexc.com/api/v3/klines"
+JIN10_LIST = "https://datacenter-api.jin10.com/reports/list_v2"
+JIN10_H = {"x-app-id": "rU6QIu7JHe2gOUeR", "x-csrf-token": "x-csrf-token", "x-version": "1.0.0"}
+MOFCOM_SHRZGM = "https://data.mofcom.gov.cn/datamofcom/front/gnmy/shrzgmQuery"
+
+MACRO_MONTHS = 12          # 宏观数据展示月份数（需求：近 12 个月）
+MACRO_COMMODITY_DAYS = 5   # 大宗商品近 5 日（需求保留）
+
+# 美国关键指标（东财 RPT_ECONOMICVALUE_USA）发布日历展示：INDICATOR_ID 白名单
+US_USEFUL = ("EMG00000746", "EMG00000733", "EMG00000771", "EMG00152118",
+             "EMG00001039", "EMG00002790", "EMG00002791", "EMG00177897",
+             "EMG00177799", "EMG00177909", "EMG00358536", "EMG00342250")
+
+
+def _month_key(raw):
+    """把 "2026年7月" / "2026年07月" / "202607" / "2026-07" / "2026年第二季度"
+    统一为 "2026-07"（季度取季末月 03/06/09/12）。"""
+    m = re.search(r"(\d{4})[年\-/](\d{1,2})", str(raw or ""))
+    if m:
+        return "%s-%s" % (m.group(1), m.group(2).zfill(2))
+    q = re.search(r"(\d{4})年(第[一二三四]季度)", str(raw or ""))
+    if q:
+        return "%s-%s" % (q.group(1),
+                          {"一": "03", "二": "06", "三": "09", "四": "12"}[q.group(2)[1]])
+    m = re.search(r"(\d{4})(\d{2})", str(raw or ""))
+    if m:
+        return "%s-%s" % (m.group(1), m.group(2))
+    return str(raw or "")
+
+
+def _month_short(key):
+    """"2026-07" → "26-07"。"""
+    return key[2:] if len(key) >= 7 else key
+
+
+def parse_nbs_esdata(text, n=MACRO_MONTHS):
+    """解析统计局 esData 响应 → {"months": [升序月份], "series": [[按指标顺序的值]]}。
+
+    esData 返回倒序（未来空值在前），这里取最近 n 个"有值月份"（任一指标非空），
+    升序输出；缺值以 None 占位。纯函数，可测试。
+    """
+    import json
+    try:
+        d = json.loads(text)
+    except Exception:
+        return {"months": [], "series": []}
+    rows = d.get("data") or []
+    picked = []
+    for m in rows:
+        vals = [((v or {}).get("value") or "") for v in (m.get("values") or [])]
+        if any(v for v in vals):
+            picked.append((m.get("name", ""), vals))
+            if len(picked) >= n:
+                break
+    picked.reverse()  # 升序
+    months = [_month_key(p[0]) for p in picked]
+    ncols = max((len(p[1]) for p in picked), default=0)
+    series = []
+    for i in range(ncols):
+        series.append([(_f(p[1][i]) or None) if i < len(p[1]) and p[1][i] else None
+                       for p in picked])
+    return {"months": months, "series": series}
+
+
+def parse_em_rows(text):
+    """解析东方财富 datacenter 响应 → result.data 列表（空失败返回 []）。"""
+    import json
+    try:
+        d = json.loads(text)
+        return (d.get("result") or {}).get("data") or []
+    except Exception:
+        return []
+
+
+def parse_mexc_kline(text, n=12):
+    """解析 MEXC klines → 最近 n 个交易日 [(date, close)]（升序）。
+
+    MEXC 返回 [[open_time_ms, open, high, low, close, vol, close_time_ms, amount], ...]
+    """
+    import json
+    import datetime
+    try:
+        arr = json.loads(text)
+    except Exception:
+        return []
+    out = []
+    for x in arr:
+        try:
+            d = datetime.datetime.fromtimestamp(int(x[0]) / 1000.0,
+                                                tz=timezone(timedelta(hours=8)))
+            c = _f(x[4])
+            if c > 0:
+                out.append((d.strftime("%Y-%m-%d"), c))
+        except Exception:
+            continue
+    return out[-n:]
+
+
+def parse_jin10(text):
+    """解析金十 reports/list_v2 → 最新一条 {"date": "YYYY-MM-DD", "value", "prev"}。"""
+    import json
+    try:
+        d = json.loads(text)
+        vals = (d.get("data") or {}).get("values") or []
+    except Exception:
+        return None
+    for v in vals:
+        if len(v) >= 2 and v[1] is not None:
+            return {"date": str(v[0])[:10], "value": _f(v[1]),
+                    "prev": _f(v[3]) if len(v) > 3 and v[3] is not None else None}
+    return None
+
+
+def parse_mofcom_shrzgm(text, n=MACRO_MONTHS):
+    """解析商务部社融增量 → [(month_key, 增量亿元)] 最近 n 期（升序）。
+
+    返回 JSON 数组：[{"date": "202604", "tiosfs": 6245, ...}]，tiosfs=社会融资规模增量。
+    """
+    import json
+    try:
+        arr = json.loads(text)
+    except Exception:
+        return []
+    out = []
+    for r in arr:
+        mk = _month_key(r.get("date", ""))
+        v = _f(r.get("tiosfs"))
+        if mk and v:
+            out.append((mk, v))
+    return list(reversed(out[-n:]))
+
+
+def _em_get(sess, report, columns, sort="REPORT_DATE", extra=None,
+            ref="https://data.eastmoney.com/cjsj/", token=None):
+    """东财 datacenter-web 通用抓取。"""
+    params = {
+        "reportName": report, "columns": columns,
+        "pageNumber": "1", "pageSize": "60",
+        "sortColumns": sort, "sortTypes": "-1",
+        "source": "WEB", "client": "WEB",
+        "p": "1", "pageNo": "1", "pageNum": "1",
+    }
+    if token:
+        params["token"] = token
+    if extra:
+        params.update(extra)
+    return _get_text(sess, EM_DC, params=params, headers={"Referer": ref}, tries=2, pause=0.6)
+
+
+def _nbs_esdata_post(sess, cid, ids, root, dts="202401MM-203612MM", quarter=False):
+    """POST 统计局 esData（月度/季度）。dts=None 时不传（季度接口不接受范围）。
+
+    实测：月度接口 dts 范围生效；季度接口传 dts 范围返回 500，不传返回最近 6 期。
+    """
+    payload = {
+        "cid": cid, "indicatorIds": ids, "daCatalogId": "",
+        "das": [{"text": "全国", "value": "000000000000"}],
+        "showType": "1", "rootId": root,
+    }
+    if dts:
+        payload["dts"] = [dts]
+    r = sess.post(NBS_ESDATA, json=payload, timeout=15, headers={
+        "Accept": "application/json, text/plain, */*",
+        "Referer": NBS_QREF if quarter else NBS_REF,
+        "Origin": "https://data.stats.gov.cn"})
+    r.raise_for_status()
+    return r.text
+
+
+def _latest_month_values(rows, field, fmt=None):
+    """从东财报表行（倒序）取最近 MACRO_MONTHS 期 (month_key, 值) 升序。"""
+    out = []
+    for r in rows[:MACRO_MONTHS]:
+        mk = _month_key(r.get("REPORT_DATE") or r.get("TIME"))
+        v = r.get(field)
+        if v is None or v == "":
+            continue
+        out.append((mk, _f(v) if fmt is None else fmt(v)))
+    return list(reversed(out))
+
+
+# --------------------------------------------------------------------------
+# 宏观小节抓取（并行）
+# --------------------------------------------------------------------------
+
+def _sec_macro_pmi():
+    """一、PMI及细分（近12月）：统计局 esData 6 指标。"""
+    sess = _session()
+    data = {"errors": [], "months": [], "series": {}}
+    try:
+        body = _nbs_esdata_post(sess, NBS_PMI_CID, [i for _, i in NBS_PMI_IDS], NBS_ROOT)
+        d = parse_nbs_esdata(body)
+        data["months"] = d["months"]
+        for idx, (name, _i) in enumerate(NBS_PMI_IDS):
+            data["series"][name] = d["series"][idx] if idx < len(d["series"]) else []
+        data["sources"] = {"国家统计局": True}
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("PMI：%s" % e)
+    return data
+
+
+def _sec_macro_inflation():
+    """二、通胀（近12月）：CPI/PPI（东财）+ PPIRM（统计局）+ 美国核心PCE（金十）。"""
+    sess = _session()
+    data = {"errors": [], "months": {}, "series": {}}
+    try:
+        rows = parse_em_rows(_em_get(sess, "RPT_ECONOMY_CPI", "REPORT_DATE,TIME,NATIONAL_SAME"))
+        out = _latest_month_values(rows, "NATIONAL_SAME")
+        data["months"]["cpi"] = [m for m, _v in out]
+        data["series"]["CPI同比"] = [v for _m, v in out]
+        data["sources"] = {"东方财富": True}
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("CPI：%s" % e)
+    try:
+        rows = parse_em_rows(_em_get(sess, "RPT_ECONOMY_PPI", "REPORT_DATE,TIME,BASE_SAME"))
+        out = _latest_month_values(rows, "BASE_SAME")
+        data["months"]["ppi"] = [m for m, _v in out]
+        data["series"]["PPI同比"] = [v for _m, v in out]
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("PPI：%s" % e)
+    try:
+        body = _nbs_esdata_post(sess, NBS_PPIRM_CID, [i for _, i in NBS_PPIRM_IDS], NBS_ROOT)
+        d = parse_nbs_esdata(body)
+        # 上年同月=100 → 同比% = 值-100
+        data["months"]["ppirm"] = d["months"]
+        data["series"]["PPIRM同比"] = [
+            (v - 100.0) if v is not None else None for v in (d["series"][0] if d["series"] else [])]
+        data["sources"]["国家统计局"] = True
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("PPIRM：%s" % e)
+    try:
+        t = int(time.time() * 1000)
+        text = _get_text(sess, JIN10_LIST, params={"category": "ec", "attr_id": "80", "_": str(t)},
+                         headers=JIN10_H, tries=2, pause=0.6)
+        p = parse_jin10(text)
+        if p:
+            data["series"]["美国核心PCE"] = [p["value"]]
+            data["months"]["us_pce"] = [p["date"][:7]]
+            data["sources"]["金十"] = True
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("美国核心PCE：%s" % e)
+    return data
+
+
+def _sec_macro_liquidity():
+    """三、流动性（近12月）：M1/M2、新增人民币贷款（东财）+ 社融增量（商务部）。"""
+    sess = _session()
+    data = {"errors": [], "months": {}, "series": {}}
+    try:
+        rows = parse_em_rows(_em_get(
+            sess, "RPT_ECONOMY_CURRENCY_SUPPLY",
+            "REPORT_DATE,TIME,CURRENCY_SAME,BASIC_CURRENCY_SAME"))
+        out_m1 = _latest_month_values(rows, "CURRENCY_SAME")
+        out_m2 = _latest_month_values(rows, "BASIC_CURRENCY_SAME")
+        data["months"]["m"] = [m for m, _v in out_m2]
+        data["series"]["M1同比"] = [v for _m, v in out_m1]
+        data["series"]["M2同比"] = [v for _m, v in out_m2]
+        data["sources"] = {"东方财富": True}
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("货币供应：%s" % e)
+    try:
+        rows = parse_em_rows(_em_get(sess, "RPT_ECONOMY_RMB_LOAN", "REPORT_DATE,TIME,RMB_LOAN"))
+        out = _latest_month_values(rows, "RMB_LOAN")
+        data["months"]["loan"] = [m for m, _v in out]
+        data["series"]["新增人民币贷款"] = [v for _m, v in out]
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("新增贷款：%s" % e)
+    try:
+        r = sess.post(MOFCOM_SHRZGM, timeout=12, headers={"Accept": "application/json, text/plain, */*"})
+        r.raise_for_status()
+        out = parse_mofcom_shrzgm(r.text)
+        data["months"]["shrzgm"] = [m for m, _v in out]
+        data["series"]["社融增量"] = [v for _m, v in out]
+        data["sources"]["商务部"] = True
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("社融：%s" % e)
+    return data
+
+
+def _monthly_last(kv_pairs, n=MACRO_MONTHS):
+    """把 (date, value) 日序列压缩为每月末值 [(month_key, 该月最后一条值)] 升序。"""
+    by_month = {}
+    for d, v in kv_pairs:
+        mk = d[:7]
+        by_month[mk] = v  # 输入升序 → 后者覆盖 = 月末值
+    out = sorted(by_month.items())[-n:]
+    return out
+
+
+def _sec_macro_assets():
+    """四、资产价格：黄金/比特币/中国10年国债（月末值）+ 1年期LPR + 派生源（房价/GDP）。"""
+    sess = _session()
+    data = {"errors": [], "months": {}, "series": {}, "extra": {}}
+    try:
+        text = _get_text(sess, SINA_GLOBAL_KLINE, params={"symbol": "XAU"},
+                         headers={"Referer": "https://finance.sina.com.cn/"})
+        out = _monthly_last(parse_sina_global_kline(text, 400))
+        data["months"]["gold"] = [m for m, _v in out]
+        data["series"]["伦敦金"] = [v for _m, v in out]
+        data["sources"] = {"新浪": True}
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("黄金：%s" % e)
+    try:
+        text = _get_text(sess, MEXC_KLINE, params={
+            "symbol": "BTCUSDT", "interval": "1d", "limit": "400"}, tries=2, pause=0.6)
+        out = _monthly_last(parse_mexc_kline(text, 400))
+        data["months"]["btc"] = [m for m, _v in out]
+        data["series"]["比特币"] = [v for _m, v in out]
+        data["sources"]["MEXC"] = True
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("比特币：%s" % e)
+    try:
+        rows = parse_em_rows(_em_get(
+            sess, "RPTA_WEB_TREASURYYIELD", "ALL", sort="SOLAR_DATE",
+            token=EM_TOKEN, extra={"pageSize": "500"},
+            ref="https://data.eastmoney.com/cjsj/zmgzsyl.html"))
+        pairs = [(str(r.get("SOLAR_DATE", ""))[:10], _f(r.get("EMM00166466")))
+                 for r in rows if r.get("EMM00166466") not in (None, "")]
+        out = _monthly_last([p for p in pairs if p[1] > 0])
+        data["months"]["cn10y"] = [m for m, _v in out]
+        data["series"]["中国10年国债"] = [v for _m, v in out]
+        data["sources"]["东方财富"] = True
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("国债收益率：%s" % e)
+    try:
+        rows = parse_em_rows(_em_get(
+            sess, "RPTA_WEB_RATE", "ALL", sort="TRADE_DATE", token=EM_TOKEN,
+            ref="https://data.eastmoney.com/cjsj/globalRateLPR.html"))
+        out = []
+        for r in rows[:MACRO_MONTHS]:
+            mk = _month_key(r.get("TRADE_DATE"))
+            v = r.get("LPR1Y")
+            if mk and v not in (None, ""):
+                out.append((mk, _f(v)))
+        out.reverse()
+        data["months"]["lpr"] = [m for m, _v in out]
+        data["series"]["1年期LPR"] = [v for _m, v in out]
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("LPR：%s" % e)
+    try:
+        rows = parse_em_rows(_em_get(
+            sess, "RPT_ECONOMY_HOUSE_PRICE",
+            "REPORT_DATE,CITY,FIRST_COMHOUSE_SAME",
+            extra={"filter": '(CITY in ("北京","上海","广州","深圳"))'},
+            ref="https://data.eastmoney.com/cjsj/newhouse.html"))
+        if rows:
+            cur = rows[0].get("REPORT_DATE", "")[:7]
+            vals = [_f(r.get("FIRST_COMHOUSE_SAME")) - 100.0
+                    for r in rows[:8] if r.get("FIRST_COMHOUSE_SAME")]
+            data["extra"]["house_yoy"] = sum(vals) / len(vals) if vals else None
+            data["extra"]["house_month"] = cur
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("房价：%s" % e)
+    try:
+        rows = parse_em_rows(_em_get(sess, "RPT_ECONOMY_GDP", "REPORT_DATE,TIME,SUM_SAME"))
+        if rows:
+            data["extra"]["gdp_nominal_yoy"] = _f(rows[0].get("SUM_SAME"))
+            data["extra"]["gdp_month"] = str(rows[0].get("TIME", ""))[:12]
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("GDP：%s" % e)
+    try:
+        # 季度接口不接受 dts 范围（500），不传返回最近 6 期（够算同比 t-4）
+        body = _nbs_esdata_post(sess, NBS_GDP_CID, [NBS_GDP_Q], NBS_QROOT,
+                                dts=None, quarter=True)
+        d = parse_nbs_esdata(body, n=6)
+        sv = d["series"][0] if d["series"] else []
+        sm = d["months"]
+        # 不变价GDP当季值同比 = V_t / V_t-4 - 1
+        pairs = [(m, v) for m, v in zip(sm, sv) if v]
+        yoy = None
+        if len(pairs) >= 5:
+            m_t, v_t = pairs[-1]
+            m_base = None
+            for m, v in pairs:
+                if _quarter_shift(m_t, -4) == m:
+                    m_base = (m, v)
+                    break
+            if m_base and m_base[1]:
+                yoy = (v_t / m_base[1] - 1.0) * 100.0
+        data["extra"]["gdp_real_yoy"] = round(yoy, 2) if yoy is not None else None
+        data["extra"]["gdp_real_month"] = pairs[-1][0] if pairs else None
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("不变价GDP：%s" % e)
+    return data
+
+
+def _quarter_shift(month_key, delta):
+    """季度"2026-06"往前/后移 delta 个季度 → 同格式（取季度末月）。"""
+    try:
+        y = int(month_key[:4])
+        m = int(month_key[5:7])
+        q = (m - 1) // 3 + 1
+        qi = (q - 1 + delta) % 4 + 1
+        yy = y + (q - 1 + delta) // 4
+        return "%s-%02d" % (yy, qi * 3)
+    except Exception:
+        return None
+
+
+def _sec_macro_usdata():
+    """六、中美关键指标发布：东财美国经济数据（发布计划 + 结果，白名单）。"""
+    sess = _session()
+    data = {"errors": [], "us": []}
+    try:
+        rows = parse_em_rows(_em_get(
+            sess, "RPT_ECONOMICVALUE_USA", "ALL",
+            extra={"pageSize": "200"}, ref="https://data.eastmoney.com/cjsj/usa.html"))
+        for r in rows:
+            iid = r.get("INDICATOR_ID")
+            if iid not in US_USEFUL:
+                continue
+            pd_ = str(r.get("PUBLISH_DATE") or "")[:10]
+            if not pd_:
+                continue
+            data["us"].append({
+                "date": pd_,
+                "name": (r.get("INDICATOR_NAME") or "").replace("美国:", ""),
+                "value": r.get("VALUE"),
+                "prev": r.get("PRE_VALUE"),
+                "period": str(r.get("REPORT_DATE_CH") or "")[:12],
+            })
+        data["us"].sort(key=lambda x: x["date"], reverse=True)
+        data["us"] = data["us"][:12]
+        data["sources"] = {"东方财富": True}
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("美国指标：%s" % e)
+    return data
+
+
+def _sec_macro_commodity():
+    """五、大宗商品近 5 日：伦敦金 / WTI / 金油比（复用历史小节）。"""
+    sess = _session()
+    data = {"errors": [], "dates": [], "gold": [], "wti": [], "ratio": []}
+    try:
+        text = _get_text(sess, SINA_GLOBAL_KLINE, params={"symbol": "XAU"},
+                         headers={"Referer": "https://finance.sina.com.cn/"})
+        xau = dict(parse_sina_global_kline(text, 8))
+        text = _get_text(sess, SINA_GLOBAL_KLINE, params={"symbol": "CL"},
+                         headers={"Referer": "https://finance.sina.com.cn/"})
+        wti = dict(parse_sina_global_kline(text, 8))
+        dates = sorted(set(xau) & set(wti))[-MACRO_COMMODITY_DAYS:]
+        data["dates"] = dates
+        data["gold"] = [xau[d] for d in dates]
+        data["wti"] = [wti[d] for d in dates]
+        data["ratio"] = [round(xau[d] / wti[d], 1) if wti[d] else None for d in dates]
+        data["sources"] = {"新浪": True}
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("大宗商品：%s" % e)
+    return data
+
+
+MACRO_SECTIONS = [
+    ("macro_pmi", _sec_macro_pmi),
+    ("macro_inflation", _sec_macro_inflation),
+    ("macro_liquidity", _sec_macro_liquidity),
+    ("macro_assets", _sec_macro_assets),
+    ("macro_usdata", _sec_macro_usdata),
+    ("macro_commodity", _sec_macro_commodity),
+]
+
+
+def _new_macro_state():
+    return {
+        "ok": True, "ts": _cn_now().strftime("%H:%M:%S"), "sources": {},
+        "pmi": {"months": [], "series": {}},
+        "inflation": {"months": {}, "series": {}},
+        "liquidity": {"months": {}, "series": {}},
+        "assets": {"months": {}, "series": {}, "extra": {}},
+        "us": [],
+        "commodity": {"dates": [], "gold": [], "wti": [], "ratio": []},
+        "errors": [],
+    }
+
+
+def _merge_macro(out, key, data):
+    data = data or {}
+    if key == "macro_pmi":
+        out["pmi"] = {"months": data.get("months", []), "series": data.get("series", {})}
+    elif key == "macro_inflation":
+        out["inflation"] = {"months": data.get("months", {}), "series": data.get("series", {})}
+    elif key == "macro_liquidity":
+        out["liquidity"] = {"months": data.get("months", {}), "series": data.get("series", {})}
+    elif key == "macro_assets":
+        out["assets"] = {"months": data.get("months", {}), "series": data.get("series", {}),
+                         "extra": data.get("extra", {})}
+    elif key == "macro_usdata":
+        out["us"] = data.get("us", [])
+    elif key == "macro_commodity":
+        out["commodity"] = {k: data.get(k, []) for k in
+                            ("dates", "gold", "wti", "ratio")}
+    for e in data.get("errors", []):
+        out["errors"].append(e)
+    for s, v in (data.get("sources") or {}).items():
+        out["sources"][s] = v
+
+
+def refresh_macro(on_done=None):
+    """刷新宏观数据（并行小节后合并，返回完整 dict）。"""
+    results = {}
+
+    def run(key, fn):
+        try:
+            data = fn()
+        except Exception as e:  # noqa: BLE001
+            data = {"errors": [str(e)]}
+        results[key] = data
+
+    threads = [threading.Thread(target=run, args=(k, f), daemon=True)
+               for k, f in MACRO_SECTIONS]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    out = _new_macro_state()
+    for k, _f in MACRO_SECTIONS:
+        _merge_macro(out, k, results.get(k))
+    if on_done:
+        try:
+            on_done(out)
+        except Exception:  # noqa: BLE001
+            pass
+    return out
+
+
+# --------------------------------------------------------------------------
+# 宏观派生指标（纯函数，可测试）
+# --------------------------------------------------------------------------
+
+def derive_macro_pmi(series):
+    """PMI 派生：经济势能/供需差/备料差/TEC（用最新两期，缺值 None）。
+
+    series: {"PMI","生产","新订单","产成品库存","采购量","原材料库存": [值...]}
+    返回 {名称: (最新值, 公式, 说明)}。
+    """
+    def last2(k):
+        v = series.get(k) or []
+        return (v[-1] if v else None, v[-2] if len(v) > 1 else None)
+    xd, xd_p = last2("新订单")
+    ck, ck_p = last2("产成品库存")
+    sc, _ = last2("生产")
+    gl, _ = last2("采购量")
+    yl, _ = last2("原材料库存")
+    out = {}
+    out["经济势能"] = (xd - ck) if (xd is not None and ck is not None) else None
+    out["供需差"] = (sc - xd) if (sc is not None and xd is not None) else None
+    out["备料差"] = (gl - yl) if (gl is not None and yl is not None) else None
+    if xd is not None and xd_p is not None and ck is not None and ck_p is not None:
+        out["TEC"] = (xd - xd_p) - (ck - ck_p)
+    else:
+        out["TEC"] = None
+    return out
+
+
+def derive_macro_inflation(series):
+    """通胀派生：通胀预期指数 = CPI同比 - PPI同比（最新两期对齐）。"""
+    cpi = series.get("CPI同比") or []
+    ppi = series.get("PPI同比") or []
+    n = min(len(cpi), len(ppi))
+    if n == 0:
+        return {}
+    v = None
+    for i in range(n - 1, -1, -1):
+        if cpi[i] is not None and ppi[i] is not None:
+            v = cpi[i] - ppi[i]
+            break
+    return {"通胀预期指数": v}
+
+
+def derive_macro_liquidity(series):
+    """流动性派生：M1-M2 剪刀差（最新两期对齐）。"""
+    m1 = series.get("M1同比") or []
+    m2 = series.get("M2同比") or []
+    n = min(len(m1), len(m2))
+    if n == 0:
+        return {}
+    v = None
+    for i in range(n - 1, -1, -1):
+        if m1[i] is not None and m2[i] is not None:
+            v = m1[i] - m2[i]
+            break
+    return {"M1-M2剪刀差": v}
+
+
+def derive_macro_assets(series, extra):
+    """资产价格派生：金比特币 / 中国实际利率 / GDP平减指数。
+
+    series: {"伦敦金","比特币","中国10年国债","1年期LPR": [值...]}
+    extra: {"house_yoy","gdp_nominal_yoy","gdp_real_yoy"}
+    """
+    out = {}
+    g = (series.get("伦敦金") or [])
+    b = (series.get("比特币") or [])
+    if g and b and g[-1] and b[-1]:
+        out["金比特币"] = g[-1] / b[-1]
+    lpr = (series.get("1年期LPR") or [])
+    hy = extra.get("house_yoy")
+    if lpr and lpr[-1] is not None and hy is not None:
+        out["中国实际利率"] = lpr[-1] - hy
+    ny = extra.get("gdp_nominal_yoy")
+    ry = extra.get("gdp_real_yoy")
+    if ny is not None and ry is not None:
+        out["GDP平减指数"] = ny - ry
+    return out

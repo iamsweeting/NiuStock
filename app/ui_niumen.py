@@ -363,7 +363,11 @@ class NiumenPage:
         box.add_widget(self.judgment_card)
 
     def _build_rules_card(self, box):
-        """本页最下方：操作规则标注（每个规则独立段落，小字）+ 免责声明（需求）。"""
+        """本页最下方：操作规则标注（每个规则一个自然段落，小字）+ 免责声明（需求）。
+
+        段落内用 text_size 绑宽自然换行；关键短语（15%总额试仓、20日/60日成本线等）
+        内部用不换行空格(\u00A0)，避免在数字与单位之间断行。
+        """
         self.rules_card = MDCard(
             orientation="vertical",
             padding=CARD_PADDING, spacing=dp(3),
@@ -376,15 +380,20 @@ class NiumenPage:
             adaptive_height=True,
         ))
         rules = [
-            "规则1·追上涨\n柱状线实体与YLX分离后，首次接触YLX\n可考虑进入15%总额试仓；\n出现红三兵、下锤线、趋势相背离时不要追。",
-            "规则2·拿成本\n大幅跌破20日/60日成本线\n可考虑收集成本，每次最多增加25%总额。",
-            "规则3·快卖出\n突破止盈线卖出，\n并结合其它趋势判断卖出额度。",
+            "规则1 追上涨：柱状线实体与YLX产生分离后，首次接触YLX可考虑进入"
+            "15%\u00A0总额试仓；但出现红三兵、下锤线、个股与板块/大盘/行业趋势相背离时不要追。",
+            "规则2 拿成本：大幅跌破20日/60日\u00A0成本线可考虑收集成本，每次最多增加"
+            "25%\u00A0总额。",
+            "规则3 快卖出：突破止盈线卖出，并结合其它趋势判断卖出额度。",
         ]
         for r in rules:
-            self.rules_card.add_widget(MDLabel(
+            lb = MDLabel(
                 text=r, font_style="Caption",
                 theme_text_color="Secondary", adaptive_height=True,
-            ))
+            )
+            # 自然换行：text_size 限宽（高度不限），Kivy 按词断行
+            lb.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
+            self.rules_card.add_widget(lb)
         self.rules_card.add_widget(MDSeparator())
         self.rules_card.add_widget(MDLabel(
             text="免责声明：本页指标与规则仅供技术分析参考，不构成任何投资建议；"

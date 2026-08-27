@@ -208,15 +208,11 @@ class MarketPage:
             ("名称", 0.46), ("最新", 0.30), ("涨跌%", 0.24)]))
         self.quotes_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
 
-        # 历史：各小节「标题 + 占位行」（大宗商品合并为一张表）
+        # 历史：各小节「标题 + 占位行」（大宗商品表已移至「宏观数据」tab）
         self.hist_box.clear_widgets()
         for fk, title in _HIST_TITLES.items():
-            if fk == "wti" or fk == "xau":
-                continue
             self.hist_box.add_widget(self._hist_title(title))
             self.hist_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
-        self.hist_box.add_widget(self._hist_title("大宗商品：伦敦金 / WTI原油 / 金油比"))
-        self.hist_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
         self.error_label.text = ""
 
     # ------------------------------------------------------------------
@@ -325,44 +321,15 @@ class MarketPage:
         self.news_label.text = "\n".join(lines)
 
     def _render_hist_field(self, key, rows):
-        """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。
-
-        伦敦金与 WTI 合并为一张"大宗商品"表，并按日计算金油比（需求）。
-        """
+        """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。"""
         # 重建整个历史区（小节少、行数少，重建代价可忽略）
         fields = {k: self._hist_rows.get(k, []) for k in _HIST_FIELDS}
         fields[key] = rows
         self._hist_rows = fields
         self.hist_box.clear_widgets()
         for fk in _HIST_FIELDS:
-            if fk == "wti" or fk == "xau":
-                # 伦敦金/WTI/金油比 合并成一张表（只在两者都到齐后渲染）
-                continue
             self._hist_section(_HIST_TITLES[fk], fields[fk],
                                fmt=_HIST_FMT[fk])
-        self._render_commodity_table(fields["xau"], fields["wti"])
-
-    def _render_commodity_table(self, xau_rows, wti_rows):
-        """大宗商品表：日期 | 伦敦金 | WTI原油 | 金油比（金/油，单位一致换算为桶/盎司）。"""
-        self.hist_box.add_widget(self._hist_title("大宗商品：伦敦金 / WTI原油 / 金油比"))
-        xmap = dict(xau_rows)
-        wmap = dict(wti_rows)
-        dates = sorted(set(xmap) & set(wmap))[-5:]
-        if not dates:
-            self.hist_box.add_widget(self._row([("暂无数据", _HINT, 1.0)]))
-            return
-        self.hist_box.add_widget(self._head_row([
-            ("日期", 0.28), ("伦敦金", 0.26), ("WTI", 0.22), ("金油比", 0.24)]))
-        for d in dates:
-            g, w = xmap[d], wmap[d]
-            # 金油比：一盎司黄金可换多少桶原油（金价美元/盎司 ÷ 油价美元/桶）
-            ratio = g / w if w else None
-            self.hist_box.add_widget(self._row([
-                (d[5:] if len(d) > 5 else d, _GREY, 0.28),
-                ("%.1f" % g, _WHITE, 0.26),
-                ("%.2f" % w, _WHITE, 0.22),
-                ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.24),
-            ]))
 
     def _hist_title(self, text):
         # 历史小节标题：不小于数值行字号（Body2），浅蓝区分（需求）
@@ -392,24 +359,16 @@ def _hex(col):
 _HIST_TITLES = {
     "turnover": "两市成交额（亿元）",
     "ccpr": "美元兑人民币中间价",
-    "wti": "WTI原油（美元/桶）",
-    "xau": "伦敦金（美元/盎司）",
 }
 _HIST_FIELDS = {
     "turnover": "turnover",
     "ccpr": "ccpr",
-    "wti": "wti",
-    "xau": "xau",
 }
 _SECTION_TO_FIELD = {
     "hist_turnover": "turnover",
     "hist_ccpr": "ccpr",
-    "hist_wti": "wti",
-    "hist_xau": "xau",
 }
 _HIST_FMT = {
     "turnover": lambda v: "%.0f" % v,
     "ccpr": lambda v: "%.4f" % v,
-    "wti": lambda v: "%.2f" % v,
-    "xau": lambda v: "%.2f" % v,
 }

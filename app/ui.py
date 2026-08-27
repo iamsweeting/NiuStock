@@ -44,6 +44,7 @@ TAB_DEFS = [
     ("pivot", "枢轴点", "calculator"),
     ("batch", "批量枢轴", "format-list-bulleted"),
     ("market", "行情", "finance"),
+    ("macro", "宏观数据", "chart-bar"),
 ]
 
 _IDLE_COLOR = (0.62, 0.66, 0.72, 1.0)
@@ -287,9 +288,10 @@ class NiumenApp(MDApp):
         from .ui_pivot import PivotPage
         from .ui_batch import BatchPage
         from .ui_market import MarketPage
+        from .ui_macro import MacroPage
         makers = {
             "niumen": NiumenPage, "pivot": PivotPage,
-            "batch": BatchPage, "market": MarketPage,
+            "batch": BatchPage, "market": MarketPage, "macro": MacroPage,
         }
         scr = Screen(name=name)
         body = ScrollView(do_scroll_x=False, bar_width=dp(4))
@@ -320,6 +322,10 @@ class NiumenApp(MDApp):
         try:
             if name == "market":
                 page = self.pages.get("market")
+                if page is not None:
+                    page.refresh_if_stale()
+            elif name == "macro":
+                page = self.pages.get("macro")
                 if page is not None:
                     page.refresh_if_stale()
             elif name == "pivot":
