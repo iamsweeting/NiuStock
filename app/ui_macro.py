@@ -389,34 +389,36 @@ class MacroPage:
         self.body.add_widget(card)
 
     def _render_us(self, us):
-        """一、中美关键指标发布（美国发布计划+结果；中国见下方月度表）。
+        """一、中美关键指标发布（美国发布计划+结果；时间正向，早→晚）。
 
-        字体更小（Caption）+ 固定行高单行裁剪，修复多行重叠（用户实测）。
+        字号 Body2、行高与间距加大（用户反馈：字小显示不全 → 加大行距、
+        字号合适），固定行高单行裁剪杜绝重叠。
         """
         if not us:
             self.body.add_widget(self._card_text("暂无发布日历数据"))
             return
         card = MDCard(
-            orientation="vertical", padding=[dp(10), dp(4), dp(10), dp(4)],
+            orientation="vertical", padding=[dp(10), dp(8), dp(10), dp(8)],
+            spacing=dp(6),
             radius=_CARD_RADIUS, elevation=0, size_hint_y=None, md_bg_color=_MAIN_BG,
         )
         card.bind(minimum_height=card.setter("height"))
         card.add_widget(self._head_row(
-            [("发布", 0.22), ("指标", 0.38), ("今值", 0.20), ("前值", 0.20)]))
+            [("发布", 0.18), ("指标", 0.42), ("今值", 0.20), ("前值", 0.20)]))
         for it in us:
             val = it.get("value")
             prev = it.get("prev")
             vtxt = "待发布" if val is None else ("%.2f" % float(val))
             ptxt = ("%.2f" % float(prev)) if prev not in (None, "") else "—"
             card.add_widget(self._row([
-                (str(it.get("date", ""))[5:], _GREY, 0.22),
-                (it.get("name", ""), _WHITE, 0.38),
+                (str(it.get("date", ""))[5:], _GREY, 0.18),
+                (it.get("name", ""), _WHITE, 0.42),
                 (vtxt, _TITLE if val is None else _WHITE, 0.20),
                 (ptxt, _HINT, 0.20),
-            ], height=22, font_style="Caption"))
+            ], height=28, font_style="Body2"))
         card.add_widget(self._meaning_line(
-            "说明：美国指标显示发布日与今值/前值（待发布=尚未公布）；"
-            "中国 CPI/PPI/PMI/M1/M2 的最近发布结果见下方月度表。"))
+            "说明：美国指标按发布日排序（早→晚），显示今值/前值（待发布=尚未公布）；"
+            "中国 CPI/PPI/PMI/M1/M2 最近发布结果见下方月度表。"))
         self.body.add_widget(card)
 
     # ------------------------------------------------------------------

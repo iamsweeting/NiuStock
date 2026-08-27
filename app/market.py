@@ -1448,6 +1448,18 @@ def refresh_macro(on_done=None):
 # --------------------------------------------------------------------------
 
 MACRO_CACHE_NAME = "nstock_macro_cache.json"
+MACRO_CACHE_VERSION = 2   # 缓存结构版本；变更后旧缓存失效（重新联网）
+
+
+def _normalize_cached_macro(state):
+    """缓存数据归一化：发布表强制时间正向排序（旧缓存可能为倒序）。"""
+    try:
+        us = state.get("us") or []
+        us = [u for u in us if u.get("date")]
+        us.sort(key=lambda x: x["date"])
+        state["us"] = us[-12:]
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _macro_cache_path():
@@ -1459,12 +1471,14 @@ def _macro_cache_path():
 
 
 def _load_macro_cache():
-    """读本地缓存 → (state dict, 缓存日期字符串)；无缓存返回 (None, None)。"""
+    """读本地缓存 → (state dict, 缓存日期字符串)；无缓存/版本不符返回 (None, None)。"""
     try:
         import json as _json
         with open(_macro_cache_path(), "r", encoding="utf-8") as f:
             d = _json.load(f)
         if not isinstance(d, dict) or "pmi" not in d:
+            return None, None
+        if d.get("cache_version") != MACRO_CACHE_VERSION:
             return None, None
         return d, str(d.get("cache_date", ""))
     except Exception:  # noqa: BLE001
@@ -1472,11 +1486,12 @@ def _load_macro_cache():
 
 
 def _save_macro_cache(state):
-    """把宏观状态写入本地缓存（含缓存日期）。"""
+    """把宏观状态写入本地缓存（含缓存日期与版本）。"""
     try:
         import json as _json
         d = dict(state)
         d["cache_date"] = _cn_now().strftime("%Y-%m-%d")
+        d["cache_version"] = MACRO_CACHE_VERSION
         with open(_macro_cache_path(), "w", encoding="utf-8") as f:
             _json.dump(d, f, ensure_ascii=False)
         return True
@@ -1490,10 +1505,12 @@ def refresh_macro_cached(on_done=None, force=False):
     - force=True：忽略缓存强制联网刷新并写缓存（用户手动刷新按钮）
     - 无缓存或缓存日期 != 今天：联网刷新并写缓存
     - 缓存日期 == 今天：直接返回缓存（标注 from_cache=True）
+    读缓存后统一归一化：中美发布表按时间正向排序（旧缓存可能为倒序）。
     """
     if not force:
         cached, cdate = _load_macro_cache()
         if cached is not None and cdate == _cn_now().strftime("%Y-%m-%d"):
+            _normalize_cached_macro(cached)
             cached["from_cache"] = True
             if on_done:
                 try:
