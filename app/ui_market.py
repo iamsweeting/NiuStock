@@ -99,8 +99,8 @@ class MarketPage:
         self.median_card.add_widget(self.median_label)
         box.add_widget(self.median_card)
 
-        # 四、最新消息（重大：半导体/金融/千亿级，只显示标题，需求）
-        box.add_widget(self._title("四、最新消息"))
+        # 四、财经消息（重大：半导体/金融/千亿级，序号【01】蓝色链接+标题，需求）
+        box.add_widget(self._title("四、财经消息"))
         self.news_card = self._make_card()
         self.news_label = MDLabel(
             text="查询中…", markup=True, font_style="Body2",
@@ -306,24 +306,27 @@ class MarketPage:
         self.median_label.text = "  ·  ".join(med_parts)
 
     def _render_news(self, news):
-        """最新消息：每条一行「● 标题」（只标题，点击打开详情；数字/字母后不断行）。
+        """财经消息：序号【01】~【10】（蓝色，点击打开详情）+ 标题纯文本。
 
+        去掉●；链接只放在序号中；标题不展开、不做超链接；行距适当拉开；
+        数字/字母后不换行（需求）。
         news: [(create_time, rich_text, docurl)]。
         """
         if not news:
-            self.news_label.text = "暂无重大消息"
+            self.news_label.text = "暂无财经消息"
             return
         lines = []
-        for _ct, text, url in news:
-            # 数字/字母后不换行：CJK↔Latin 边界插入不换行空格（需求）
+        for i, (_ct, text, url) in enumerate(news[:10], 1):
+            seq = "【%02d】" % i
             title = market._no_break_latin(text)
             if url and url.startswith("http"):
-                lines.append("[ref=%s][color=%s]● %s[/color][/ref]"
-                             % (url, _hex(_HIST_TITLE_COLOR), title))
+                lines.append("[ref=%s][color=%s]%s[/color][/ref] %s"
+                             % (url, _hex(_HIST_TITLE_COLOR), seq, title))
             else:
-                lines.append("[color=%s]● %s[/color]"
-                             % (_hex(_HIST_TITLE_COLOR), title))
-        self.news_label.text = "\n".join(lines)
+                lines.append("[color=%s]%s[/color] %s"
+                             % (_hex(_HIST_TITLE_COLOR), seq, title))
+        # 空行拉开行距（markup 里 \n\n 生效）
+        self.news_label.text = "\n\n".join(lines)
 
     def _render_hist_field(self, key, rows):
         """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。

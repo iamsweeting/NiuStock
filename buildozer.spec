@@ -17,6 +17,9 @@ source.exclude_dirs = tests,.github,.buildozer,bin,tools,__pycache__,p4a-recipes
 
 # 版本（用户确认发布版本 1.5）
 version = 1.5
+# 显式 version code（须大于旧版 102410000 与当前设备 1024105，避免降级拒绝；
+# 1.5 → 1500000，下次 1.6 → 1600000）
+android.version_code = 1500000
 
 # Python 依赖。
 # python3==3.11.5：由 docker_build.sh 动态改写为容器内构建 Python 的确切版本；

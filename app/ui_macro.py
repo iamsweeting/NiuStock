@@ -294,23 +294,23 @@ class MacroPage:
             fmt = m.get("fmt", _FMT_PCT2)
             meaning = m.get("meaning", "")
             formula = m.get("formula", "")
-            # 数值行：横向 BoxLayout（固定行高，无 markup，杜绝叠加）
+            # 数值行：横向 BoxLayout（固定行高，label 撑满行高单行，无 markup，杜绝叠加）
             row = BoxLayout(
                 orientation="horizontal", size_hint_y=None, height=dp(26),
                 spacing=dp(6),
             )
             row.add_widget(MDLabel(
-                text=key, font_style="Body2", bold=True, size_hint_x=0.42,
+                text=key, font_style="Body2", bold=True, size_hint=(0.42, 1),
                 theme_text_color="Custom", text_color=_WHITE,
                 halign="left", valign="middle",
             ))
             row.add_widget(MDLabel(
-                text=fmt(v), font_style="Body2", bold=True, size_hint_x=0.33,
+                text=fmt(v), font_style="Body2", bold=True, size_hint=(0.33, 1),
                 theme_text_color="Custom", text_color=_TITLE,
                 halign="left", valign="middle",
             ))
             row.add_widget(MDLabel(
-                text="（派生）", font_style="Caption", size_hint_x=0.25,
+                text="（派生）", font_style="Caption", size_hint=(0.25, 1),
                 theme_text_color="Custom", text_color=_HINT,
                 halign="left", valign="middle",
             ))
@@ -389,12 +389,15 @@ class MacroPage:
         self.body.add_widget(card)
 
     def _render_us(self, us):
-        """一、中美关键指标发布（美国发布计划+结果；中国见上方月度表）。"""
+        """一、中美关键指标发布（美国发布计划+结果；中国见下方月度表）。
+
+        字体更小（Caption）+ 固定行高单行裁剪，修复多行重叠（用户实测）。
+        """
         if not us:
             self.body.add_widget(self._card_text("暂无发布日历数据"))
             return
         card = MDCard(
-            orientation="vertical", padding=[dp(10), dp(6), dp(10), dp(6)],
+            orientation="vertical", padding=[dp(10), dp(4), dp(10), dp(4)],
             radius=_CARD_RADIUS, elevation=0, size_hint_y=None, md_bg_color=_MAIN_BG,
         )
         card.bind(minimum_height=card.setter("height"))
@@ -410,7 +413,7 @@ class MacroPage:
                 (it.get("name", ""), _WHITE, 0.38),
                 (vtxt, _TITLE if val is None else _WHITE, 0.20),
                 (ptxt, _HINT, 0.20),
-            ], single_line=True))
+            ], height=22, font_style="Caption"))
         card.add_widget(self._meaning_line(
             "说明：美国指标显示发布日与今值/前值（待发布=尚未公布）；"
             "中国 CPI/PPI/PMI/M1/M2 的最近发布结果见下方月度表。"))
@@ -466,25 +469,31 @@ class MacroPage:
         return lb
 
     @staticmethod
-    def _row(cells, height=_ROW_H, single_line=False):
+    def _row(cells, height=_ROW_H, single_line=True, font_style="Body2"):
+        """固定行高的行；每个 label 撑满行高 + 单行裁剪，杜绝多行重叠。
+
+        size_hint=(sx,1) 在固定高度 BoxLayout 内占满行高，text_size 绑定为
+        行内单行（超出裁剪），不再依赖 adaptive_height 纹理高度计算
+        （Adreno/KivyMD 1.1.1 上自适应高度曾导致行与行文字重叠）。
+        """
         r = BoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(height),
             spacing=dp(4),
         )
         for text, color, sx in cells:
             lb = MDLabel(
-                text=text, adaptive_height=True, size_hint_x=sx,
+                text=text, size_hint=(sx, 1),
                 theme_text_color="Custom", text_color=color,
-                halign="left", valign="middle", font_style="Body2",
+                halign="left", valign="middle", font_style=font_style,
             )
             if single_line:
-                # 单行裁剪（长指标名不换行），避免撑高固定行
+                # 单行裁剪：size→text_size 单向绑定
                 lb.bind(size=lambda o, *a: setattr(o, "text_size", (o.width, o.height)))
             r.add_widget(lb)
         return r
 
     def _head_row(self, cols):
-        return self._row([(c, _HINT, sx) for c, sx in cols])
+        return self._row([(c, _HINT, sx) for c, sx in cols], height=24)
 
 
 def _hex(col):

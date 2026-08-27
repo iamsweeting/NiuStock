@@ -1338,8 +1338,8 @@ def _sec_macro_usdata():
                 "prev": r.get("PRE_VALUE"),
                 "period": str(r.get("REPORT_DATE_CH") or "")[:12],
             })
-        data["us"].sort(key=lambda x: x["date"], reverse=True)
-        data["us"] = data["us"][:12]
+        data["us"].sort(key=lambda x: x["date"])          # 时间正向（早→晚，需求）
+        data["us"] = data["us"][-12:]                      # 取最近 12 条
         data["sources"] = {"东方财富": True}
     except Exception as e:  # noqa: BLE001
         data["errors"].append("美国指标：%s" % e)
