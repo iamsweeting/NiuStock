@@ -216,11 +216,11 @@ class MarketPage:
         # 历史：各小节「标题 + 占位行」（大宗商品合并为一张表）
         self.hist_box.clear_widgets()
         for fk, title in _HIST_TITLES.items():
-            if fk == "wti" or fk == "xau":
+            if fk in ("wti", "xau", "btc"):
                 continue
             self.hist_box.add_widget(self._hist_title(title))
             self.hist_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
-        self.hist_box.add_widget(self._hist_title("大宗商品：伦敦金 / WTI原油 / 金油比"))
+        self.hist_box.add_widget(self._hist_title("大宗商品：伦敦金 / WTI / 比特币（近5日）"))
         self.hist_box.add_widget(self._row([("查询中…", _HINT, 1.0)]))
         self.error_label.text = ""
 
@@ -275,7 +275,8 @@ class MarketPage:
         elif t:
             lines.append("本日预测额：—")
         if vp is not None and t:
-            vc = _GREEN if vp >= 0 else _RED
+            # 中国股市风格：红涨绿降（较上日增加=红、减少=绿，需求）
+            vc = _RED if vp >= 0 else _GREEN
             lines.append("较上日变化：[color=%s]%+.0f[/color] 亿"
                          % (_hex(vc), vp))
         else:
@@ -334,10 +335,10 @@ class MarketPage:
                 continue
             seq = "【%02d】" % i
             if url and url.startswith("http"):
-                head = ("[ref=%s][size=21][color=%s]%s[/color][/size][/ref]"
+                head = ("[ref=%s][size=26][color=%s]%s[/color][/size][/ref]"
                         % (url, _hex(_HIST_TITLE_COLOR), seq))
             else:
-                head = "[size=21][color=%s]%s[/color][/size]" % (_hex(_HINT), seq)
+                head = "[size=26][color=%s]%s[/color][/size]" % (_hex(_HINT), seq)
             lines.append("%s\u00A0%s" % (head, title))
         news_lb = MDLabel(
             text="\n\n".join(lines), markup=True, font_style="Body2",
@@ -349,7 +350,7 @@ class MarketPage:
     def _render_hist_field(self, key, rows):
         """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。
 
-        伦敦金与 WTI 合并为一张"大宗商品"表，并按日计算金油比（需求）。
+        伦敦金/WTI/比特币 合并为"大宗商品"表：日期|伦敦金|WTI|金油比|比特币|金比特币。
         """
         # 重建整个历史区（小节少、行数少，重建代价可忽略）
         fields = {k: self._hist_rows.get(k, []) for k in _HIST_FIELDS}
@@ -357,33 +358,55 @@ class MarketPage:
         self._hist_rows = fields
         self.hist_box.clear_widgets()
         for fk in _HIST_FIELDS:
-            if fk == "wti" or fk == "xau":
-                # 伦敦金/WTI/金油比 合并成一张表（只在两者都到齐后渲染）
+            if fk in ("wti", "xau", "btc"):
                 continue
             self._hist_section(_HIST_TITLES[fk], fields[fk],
                                fmt=_HIST_FMT[fk])
-        self._render_commodity_table(fields["xau"], fields["wti"])
+        self._render_commodity_table(fields["xau"], fields["wti"], fields["btc"])
 
-    def _render_commodity_table(self, xau_rows, wti_rows):
-        """大宗商品表：日期 | 伦敦金 | WTI原油 | 金油比（金/油，单位一致换算为桶/盎司）。"""
-        self.hist_box.add_widget(self._hist_title("大宗商品：伦敦金 / WTI原油 / 金油比"))
+    def _render_commodity_table(self, xau_rows, wti_rows, btc_rows):
+        """大宗商品表：日期 | 伦敦金 | WTI | 金油比 | 比特币 | 金比特币。
+
+        比特币数据源不可达时该位置显示一行说明（需求）。
+        """
+        self.hist_box.add_widget(self._hist_title(
+            "大宗商品：伦敦金 / WTI / 比特币（近5日）"))
         xmap = dict(xau_rows)
         wmap = dict(wti_rows)
-        dates = sorted(set(xmap) & set(wmap))[-5:]
-        if not dates:
+        bmap = dict(btc_rows)
+        base_dates = sorted(set(xmap) & set(wmap))[-5:]
+        if not base_dates:
             self.hist_box.add_widget(self._row([("暂无数据", _HINT, 1.0)]))
             return
+        if not bmap:
+            self.hist_box.add_widget(self._row(
+                [("比特币：数据源网络不可达", _HINT, 1.0)]))
         self.hist_box.add_widget(self._head_row([
-            ("日期", 0.28), ("伦敦金", 0.26), ("WTI", 0.22), ("金油比", 0.24)]))
-        for d in dates:
+            ("日期", 0.16), ("伦敦金", 0.17), ("WTI", 0.17), ("金油比", 0.17),
+            ("比特币", 0.17), ("金比特币", 0.16)]))
+        for d in base_dates:
             g, w = xmap[d], wmap[d]
-            # 金油比：一盎司黄金可换多少桶原油（金价美元/盎司 ÷ 油价美元/桶）
             ratio = g / w if w else None
+            b = bmap.get(d)
+            if b is None:
+                # 比特币不可达日期：该行金比特币列显示说明
+                self.hist_box.add_widget(self._row([
+                    (d[5:] if len(d) > 5 else d, _GREY, 0.16),
+                    ("%.1f" % g, _WHITE, 0.17),
+                    ("%.2f" % w, _WHITE, 0.17),
+                    ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.17),
+                    ("—", _HINT, 0.17),
+                    ("比特币不可达", _HINT, 0.16),
+                ]))
+                continue
+            gb = g / b if b else None
             self.hist_box.add_widget(self._row([
-                (d[5:] if len(d) > 5 else d, _GREY, 0.28),
-                ("%.1f" % g, _WHITE, 0.26),
-                ("%.2f" % w, _WHITE, 0.22),
-                ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.24),
+                (d[5:] if len(d) > 5 else d, _GREY, 0.16),
+                ("%.1f" % g, _WHITE, 0.17),
+                ("%.2f" % w, _WHITE, 0.17),
+                ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.17),
+                ("%.0f" % b, _WHITE, 0.17),
+                ("%.4f" % gb if gb else "—", _HIST_TITLE_COLOR, 0.16),
             ]))
 
     def _hist_title(self, text):
@@ -416,22 +439,26 @@ _HIST_TITLES = {
     "ccpr": "美元兑人民币中间价",
     "wti": "WTI原油（美元/桶）",
     "xau": "伦敦金（美元/盎司）",
+    "btc": "比特币（美元）",
 }
 _HIST_FIELDS = {
     "turnover": "turnover",
     "ccpr": "ccpr",
     "wti": "wti",
     "xau": "xau",
+    "btc": "btc",
 }
 _SECTION_TO_FIELD = {
     "hist_turnover": "turnover",
     "hist_ccpr": "ccpr",
     "hist_wti": "wti",
     "hist_xau": "xau",
+    "hist_btc": "btc",
 }
 _HIST_FMT = {
     "turnover": lambda v: "%.0f" % v,
     "ccpr": lambda v: "%.4f" % v,
     "wti": lambda v: "%.2f" % v,
     "xau": lambda v: "%.2f" % v,
+    "btc": lambda v: "%.0f" % v,
 }
