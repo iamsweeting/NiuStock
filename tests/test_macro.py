@@ -153,7 +153,8 @@ def test_derive_macro_assets():
               "1年期LPR": [3.1, 3.0]}
     extra = {"house_yoy": -2.3, "gdp_nominal_yoy": 4.7, "gdp_real_yoy": 3.2}
     d = market.derive_macro_assets(series, extra)
-    assert abs(d["金比特币"] - 4641.0 / 79015.0) < 1e-9     # 已恢复
+    # 金比特币 由页面最后独立计算（不在此派生，需求：资产价格组该行去掉）
+    assert "金比特币" not in d
     assert abs(d["中国实际利率"] - (3.0 - (-2.3))) < 1e-9   # 5.3
     assert abs(d["GDP平减指数"] - 1.5) < 1e-9
     # 缺房价 → 无实际利率
