@@ -312,10 +312,12 @@ class MarketPage:
         self.median_label.text = "  ·  ".join(med_parts)
 
     def _render_news(self, news):
-        """财经消息：单段连续「【序号】蓝色链接 + 标题正文」；序号加大便于点击。
+        """财经消息：每条一行「【序号】蓝色链接 + 标题正文」连续排版。
 
-        序号与标题在同一 label 内连续排版（需求：不要分两列）；序号用 markup
-        ref 链接（大字号 21sp 蓝色）；标题/正文跟在序号后，数字字母后不换行。
+        序号与标题拆为两个 label 零间距拼接：序号 label 用 markup（链接，
+        字号与正文一致，用户反馈 [size=] 标签用 px 导致序号过小）；
+        标题用纯文本 label（无 markup），\u00A0 不换行空格可靠生效，
+        正文不会因英文/数字无规律断行。
         news: [(create_time, rich_text, docurl)]，最多 10 条。
         """
         if not news:
@@ -327,25 +329,44 @@ class MarketPage:
             ))
             return
         self.news_card.clear_widgets()
-        self.news_card.spacing = dp(10)
-        lines = []
+        self.news_card.spacing = dp(8)
         for i, (_ct, text, url) in enumerate(news[:10], 1):
             title = market._no_break_latin(str(text or "").strip())
             if not title:
                 continue
+            row = BoxLayout(
+                orientation="horizontal", size_hint_y=None, spacing=dp(0),
+            )
+            row.bind(minimum_height=row.setter("height"))
             seq = "【%02d】" % i
             if url and url.startswith("http"):
-                head = ("[ref=%s][size=26][color=%s]%s[/color][/size][/ref]"
-                        % (url, _hex(_HIST_TITLE_COLOR), seq))
+                seq_lb = MDLabel(
+                    text="[ref=%s][color=%s]%s[/color][/ref]"
+                         % (url, _hex(_HIST_TITLE_COLOR), seq),
+                    markup=True, font_style="Body2",
+                    theme_text_color="Custom", text_color=_HIST_TITLE_COLOR,
+                    size_hint=(None, None), width=dp(56),
+                    halign="left", valign="top",
+                )
+                seq_lb.bind(on_ref_press=self._open_news_link)
             else:
-                head = "[size=26][color=%s]%s[/color][/size]" % (_hex(_HINT), seq)
-            lines.append("%s\u00A0%s" % (head, title))
-        news_lb = MDLabel(
-            text="\n\n".join(lines), markup=True, font_style="Body2",
-            theme_text_color="Custom", text_color=_GREY, adaptive_height=True,
-        )
-        news_lb.bind(on_ref_press=self._open_news_link)
-        self.news_card.add_widget(news_lb)
+                seq_lb = MDLabel(
+                    text="[color=%s]%s[/color]" % (_hex(_HINT), seq),
+                    markup=True, font_style="Body2",
+                    theme_text_color="Custom", text_color=_HINT,
+                    size_hint=(None, None), width=dp(56),
+                    halign="left", valign="top",
+                )
+            title_lb = MDLabel(
+                text=title, font_style="Body2",
+                theme_text_color="Custom", text_color=_GREY,
+                size_hint=(1, None), adaptive_height=True,
+                halign="left", valign="top",
+            )
+            title_lb.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
+            row.add_widget(seq_lb)
+            row.add_widget(title_lb)
+            self.news_card.add_widget(row)
 
     def _render_hist_field(self, key, rows):
         """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。
@@ -378,46 +399,48 @@ class MarketPage:
             self.hist_box.add_widget(self._row([("暂无数据", _HINT, 1.0)]))
             return
         if not bmap:
-            # 比特币整体不可达：单行说明 + 4 列表格
-            self.hist_box.add_widget(self._row(
-                [("比特币：数据源网络不可达，暂仅显示金/WTI/金油比", _HINT, 1.0)]))
+            # 比特币整体不可达：不显示说明文字（避免覆盖标题），6列表格中
+            # 比特币列标 404（网络不通）、比金比列标 —（需求）
             self.hist_box.add_widget(self._head_row([
-                ("日期", 0.25), ("伦敦金", 0.25), ("WTI", 0.25), ("金油比", 0.25)]))
+                ("日期", 0.16), ("伦敦金", 0.17), ("WTI", 0.17), ("金油比", 0.17),
+                ("比特币", 0.17), ("比金比", 0.16)]))
             for d in dates:
                 g, w = xmap[d], wmap[d]
                 ratio = g / w if w else None
                 self.hist_box.add_widget(self._row([
-                    (d[5:] if len(d) > 5 else d, _GREY, 0.25),
-                    ("%.1f" % g, _WHITE, 0.25),
-                    ("%.2f" % w, _WHITE, 0.25),
-                    ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.25),
+                    (d[5:] if len(d) > 5 else d, _GREY, 0.16),
+                    ("%.1f" % g, _WHITE, 0.17),
+                    ("%.2f" % w, _WHITE, 0.17),
+                    ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.17),
+                    ("404", _HINT, 0.17),
+                    ("—", _HINT, 0.16),
                 ]))
             return
         self.hist_box.add_widget(self._head_row([
             ("日期", 0.16), ("伦敦金", 0.17), ("WTI", 0.17), ("金油比", 0.17),
-            ("比特币", 0.17), ("金比特币", 0.16)]))
+            ("比特币", 0.17), ("比金比", 0.16)]))
         for d in dates:
             g, w = xmap[d], wmap[d]
             ratio = g / w if w else None
             b = bmap.get(d)
             if b:
-                gb = g / b
+                bgr = b / g
                 self.hist_box.add_widget(self._row([
                     (d[5:] if len(d) > 5 else d, _GREY, 0.16),
                     ("%.1f" % g, _WHITE, 0.17),
                     ("%.2f" % w, _WHITE, 0.17),
                     ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.17),
                     ("%.0f" % b, _WHITE, 0.17),
-                    ("%.4f" % gb, _HIST_TITLE_COLOR, 0.16),
+                    ("%.2f" % bgr, _HIST_TITLE_COLOR, 0.16),
                 ]))
             else:
-                # 个别日期缺失：金比特币列显示 "—"，不重复文字
+                # 个别日期缺失：比特币=404（网络不通），比金比=—
                 self.hist_box.add_widget(self._row([
                     (d[5:] if len(d) > 5 else d, _GREY, 0.16),
                     ("%.1f" % g, _WHITE, 0.17),
                     ("%.2f" % w, _WHITE, 0.17),
                     ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.17),
-                    ("—", _HINT, 0.17),
+                    ("404", _HINT, 0.17),
                     ("—", _HINT, 0.16),
                 ]))
 
