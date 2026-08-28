@@ -1471,7 +1471,7 @@ def _sec_macro_usdata():
         if p:
             data["us"].append({
                 "date": p["date"],
-                "name": "美国核心PCE物价指数年率（金十，更新至%s）" % p["date"][:7],
+                "name": "核心PCE物价指数年率",
                 "value": p["value"],
                 "prev": p.get("prev"),
                 "period": "",
