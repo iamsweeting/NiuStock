@@ -149,11 +149,10 @@ def test_derive_macro_liquidity():
 
 
 def test_derive_macro_assets():
-    series = {"伦敦金": [4000.0, 4641.0], "比特币": [70000.0, 79015.0],
-              "1年期LPR": [3.1, 3.0]}
+    series = {"伦敦金": [4000.0, 4641.0], "1年期LPR": [3.1, 3.0]}
     extra = {"house_yoy": -2.3, "gdp_nominal_yoy": 4.7, "gdp_real_yoy": 3.2}
     d = market.derive_macro_assets(series, extra)
-    assert abs(d["金比特币"] - 4641.0 / 79015.0) < 1e-9
+    assert "金比特币" not in d                     # 比特币已删除（手机网络不可达）
     assert abs(d["中国实际利率"] - (3.0 - (-2.3))) < 1e-9   # 5.3
     assert abs(d["GDP平减指数"] - 1.5) < 1e-9
     # 缺房价 → 无实际利率
