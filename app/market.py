@@ -279,6 +279,21 @@ def _news_score(text):
 _NO_BREAK_RE = None
 
 
+def split_news_title(text):
+    """拆新闻标题/正文：按第一个 ：:—— 拆分；无分隔符或标题为空返回 (None, None)。
+
+    需求：财经消息标题【标题】作链接、正文可换行；无标题的新闻直接忽略。
+    """
+    m = re.search(r"^(.*?)[：:—]+\s*(.*)$", str(text or ""), re.S)
+    if not m:
+        return None, None
+    title = m.group(1).strip()
+    body = m.group(2).strip()
+    if not title:
+        return None, None
+    return title, body[:100]   # 正文控制在 100 字内
+
+
 def _no_break_latin(text):
     """在 拉丁字母/数字 与 CJK（含全角标点）边界插入不换行空格(\u00A0)。
 
