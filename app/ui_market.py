@@ -365,49 +365,61 @@ class MarketPage:
         self._render_commodity_table(fields["xau"], fields["wti"], fields["btc"])
 
     def _render_commodity_table(self, xau_rows, wti_rows, btc_rows):
-        """大宗商品表：日期 | 伦敦金 | WTI | 金油比 | 比特币 | 金比特币。
-
-        比特币数据源不可达时该位置显示一行说明（需求）。
+        """大宗商品表：比特币可达 → 6列（日期|伦敦金|WTI|金油比|比特币|金比特币）；
+        比特币整体不可达 → 顶部一行说明 + 4列（避免每行重复文字，需求）。
         """
         self.hist_box.add_widget(self._hist_title(
             "大宗商品：伦敦金 / WTI / 比特币（近5日）"))
         xmap = dict(xau_rows)
         wmap = dict(wti_rows)
         bmap = dict(btc_rows)
-        base_dates = sorted(set(xmap) & set(wmap))[-5:]
-        if not base_dates:
+        dates = sorted(set(xmap) & set(wmap))[-5:]
+        if not dates:
             self.hist_box.add_widget(self._row([("暂无数据", _HINT, 1.0)]))
             return
         if not bmap:
+            # 比特币整体不可达：单行说明 + 4 列表格
             self.hist_box.add_widget(self._row(
-                [("比特币：数据源网络不可达", _HINT, 1.0)]))
+                [("比特币：数据源网络不可达，暂仅显示金/WTI/金油比", _HINT, 1.0)]))
+            self.hist_box.add_widget(self._head_row([
+                ("日期", 0.25), ("伦敦金", 0.25), ("WTI", 0.25), ("金油比", 0.25)]))
+            for d in dates:
+                g, w = xmap[d], wmap[d]
+                ratio = g / w if w else None
+                self.hist_box.add_widget(self._row([
+                    (d[5:] if len(d) > 5 else d, _GREY, 0.25),
+                    ("%.1f" % g, _WHITE, 0.25),
+                    ("%.2f" % w, _WHITE, 0.25),
+                    ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.25),
+                ]))
+            return
         self.hist_box.add_widget(self._head_row([
             ("日期", 0.16), ("伦敦金", 0.17), ("WTI", 0.17), ("金油比", 0.17),
             ("比特币", 0.17), ("金比特币", 0.16)]))
-        for d in base_dates:
+        for d in dates:
             g, w = xmap[d], wmap[d]
             ratio = g / w if w else None
             b = bmap.get(d)
-            if b is None:
-                # 比特币不可达日期：该行金比特币列显示说明
+            if b:
+                gb = g / b
+                self.hist_box.add_widget(self._row([
+                    (d[5:] if len(d) > 5 else d, _GREY, 0.16),
+                    ("%.1f" % g, _WHITE, 0.17),
+                    ("%.2f" % w, _WHITE, 0.17),
+                    ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.17),
+                    ("%.0f" % b, _WHITE, 0.17),
+                    ("%.4f" % gb, _HIST_TITLE_COLOR, 0.16),
+                ]))
+            else:
+                # 个别日期缺失：金比特币列显示 "—"，不重复文字
                 self.hist_box.add_widget(self._row([
                     (d[5:] if len(d) > 5 else d, _GREY, 0.16),
                     ("%.1f" % g, _WHITE, 0.17),
                     ("%.2f" % w, _WHITE, 0.17),
                     ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.17),
                     ("—", _HINT, 0.17),
-                    ("比特币不可达", _HINT, 0.16),
+                    ("—", _HINT, 0.16),
                 ]))
-                continue
-            gb = g / b if b else None
-            self.hist_box.add_widget(self._row([
-                (d[5:] if len(d) > 5 else d, _GREY, 0.16),
-                ("%.1f" % g, _WHITE, 0.17),
-                ("%.2f" % w, _WHITE, 0.17),
-                ("%.1f" % ratio if ratio else "—", _HIST_TITLE_COLOR, 0.17),
-                ("%.0f" % b, _WHITE, 0.17),
-                ("%.4f" % gb if gb else "—", _HIST_TITLE_COLOR, 0.16),
-            ]))
 
     def _hist_title(self, text):
         # 历史小节标题：不小于数值行字号（Body2），浅蓝区分（需求）
