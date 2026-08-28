@@ -260,7 +260,8 @@ class MacroPage:
         if prev is not None:
             d = v - prev
             arrow = "▲" if d >= 0 else "▼"
-            col = _GREEN if d >= 0 else _RED
+            # 中国股市风格：红涨绿降（需求）
+            col = _RED if d >= 0 else _GREEN
             diff_txt = "  [color=%s]%s%+.2f[/color]" % (_hex(col), arrow, d)
         return ("[color=%s]%s[/color]  %s%s%s"
                 % (_hex(_WHITE), name, fmt(v), mlabel, diff_txt), v)
@@ -480,7 +481,7 @@ class MacroPage:
             card.add_widget(self._meaning_line("中国指标数据加载中…"))
         self.body.add_widget(card)
 
-        # ---- 美国部分：东财发布日历（发布日 + 本期/上期，未公布=待发布）----
+        # ---- 美国部分：与中国一致（指标|本期|上期|下次发布；未公布=待发布）----
         if us:
             card2 = MDCard(
                 orientation="vertical", padding=[dp(10), dp(8), dp(10), dp(8)],
@@ -490,17 +491,17 @@ class MacroPage:
             card2.bind(minimum_height=card2.setter("height"))
             card2.add_widget(self._row([("美国", _TITLE, 1.0)], height=26, font_style="Body2"))
             card2.add_widget(self._head_row(
-                [("发布", 0.20), ("指标", 0.40), ("今值", 0.20), ("前值", 0.20)]))
+                [("指标", 0.34), ("本期", 0.22), ("上期", 0.22), ("下次发布", 0.22)]))
             for it in us:
                 val = it.get("value")
                 prev = it.get("prev")
                 vtxt = "待发布" if val is None else ("%.2f" % float(val))
                 ptxt = ("%.2f" % float(prev)) if prev not in (None, "") else "—"
                 card2.add_widget(self._row([
-                    (str(it.get("date", ""))[5:], _GREY, 0.20),
-                    (it.get("name", ""), _WHITE, 0.40),
-                    (vtxt, _TITLE if val is None else _WHITE, 0.20),
-                    (ptxt, _HINT, 0.20),
+                    (it.get("name", ""), _WHITE, 0.34),
+                    (vtxt, _TITLE if val is None else _WHITE, 0.22),
+                    (ptxt, _HINT, 0.22),
+                    (str(it.get("date", ""))[5:], _GREEN, 0.22),
                 ], height=36, font_style="Body2"))
             card2.add_widget(self._meaning_line(
                 "未公布（待发布）为即将到来的发布提醒；已公布显示最新值。"))
