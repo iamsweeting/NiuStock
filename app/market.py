@@ -789,6 +789,21 @@ def _sec_week_news():
     return data
 
 
+def _sec_hist_btc():
+    """历史⑤：比特币近 5 日（MEXC；不可达时留空，UI 显示说明行）。"""
+    sess = _session()
+    data = {"errors": []}
+    try:
+        text = _get_text(sess, MEXC_KLINE, params={
+            "symbol": "BTCUSDT", "interval": "1d", "limit": "10"},
+            tries=2, pause=0.6)
+        data["btc"] = parse_mexc_kline(text, 5)
+        data["sources"] = {"MEXC": True}
+    except Exception as e:  # noqa: BLE001
+        data["errors"].append("比特币：%s" % e)
+    return data
+
+
 _SECTIONS = [
     ("live_sina", _sec_live_sina),
     ("live_median", _sec_live_median),
@@ -796,6 +811,7 @@ _SECTIONS = [
     ("hist_ccpr", _sec_hist_ccpr),
     ("hist_xau", _sec_hist_xau),
     ("hist_wti", _sec_hist_wti),
+    ("hist_btc", _sec_hist_btc),
     ("week_news", _sec_week_news),
 ]
 
@@ -826,6 +842,8 @@ def _merge_section(out, key, data):
         hist["xau"] = data.get("xau", [])
     elif key == "hist_wti":
         hist["wti"] = data.get("wti", [])
+    elif key == "hist_btc":
+        hist["btc"] = data.get("btc", [])
     elif key == "week_news":
         hist["news"] = data.get("news", [])
     for e in data.get("errors", []):
@@ -840,7 +858,7 @@ def _new_state():
         "live": {"quotes": [], "turnover_yi": None, "turnover_pred_yi": None,
                  "turnover_vs_prev": None,
                  "csi300_median": None, "hs300_median_pe": None, "errors": []},
-        "history": {"turnover": [], "ccpr": [], "wti": [], "xau": [],
+        "history": {"turnover": [], "ccpr": [], "wti": [], "xau": [], "btc": [],
                     "news": [], "errors": []},
     }
 
@@ -935,6 +953,21 @@ MACRO_COMMODITY_DAYS = 5   # 大宗商品近 5 日（需求保留）
 US_USEFUL = ("EMG00000746", "EMG00000733", "EMG00000771", "EMG00152118",
              "EMG00001039", "EMG00002790", "EMG00002791", "EMG00177897",
              "EMG00177799", "EMG00177909", "EMG00358536", "EMG00342250")
+# 美国指标名简化（东财全名过长，两行以上显示怪异，需求）
+US_NAME_SHORT = {
+    "EMG00358536": "联邦基金利率(下限)",
+    "EMG00342250": "联邦基金利率(上限)",
+    "EMG00000746": "核心CPI同比",
+    "EMG00000733": "CPI同比",
+    "EMG00000771": "核心CPI环比",
+    "EMG00152118": "非农就业人数",
+    "EMG00001039": "失业率",
+    "EMG00002790": "ISM制造业PMI",
+    "EMG00002791": "ISM服务业PMI",
+    "EMG00177897": "PPI环比",
+    "EMG00177799": "核心PPI同比",
+    "EMG00177909": "核心PPI环比",
+}
 
 
 def _month_key(raw):
@@ -1414,7 +1447,8 @@ def _sec_macro_usdata():
                 continue
             data["us"].append({
                 "date": pd_,
-                "name": (r.get("INDICATOR_NAME") or "").replace("美国:", ""),
+                "name": US_NAME_SHORT.get(iid,
+                          (r.get("INDICATOR_NAME") or "").replace("美国:", "")),
                 "value": r.get("VALUE"),
                 "prev": r.get("PRE_VALUE"),
                 "period": str(r.get("REPORT_DATE_CH") or "")[:12],
@@ -1694,10 +1728,6 @@ def derive_macro_assets(series, extra):
     extra: {"house_yoy","gdp_nominal_yoy","gdp_real_yoy"}
     """
     out = {}
-    g = (series.get("伦敦金") or [])
-    b = (series.get("比特币") or [])
-    if g and b and g[-1] and b[-1]:
-        out["金比特币"] = g[-1] / b[-1]
     lpr = (series.get("1年期LPR") or [])
     hy = extra.get("house_yoy")
     if lpr and lpr[-1] is not None and hy is not None:
