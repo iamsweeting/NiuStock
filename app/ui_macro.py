@@ -371,7 +371,7 @@ class MacroPage:
             theme_text_color="Custom", text_color=_WHITE, adaptive_height=True,
         ))
         card.add_widget(self._meaning_line(
-            "含义：一盎司黄金可换WTI桶数，反映贵金属/能源比价；走阔=避险升温，股市偏空"))
+            "含义：一盎司黄金可换WTI桶数，反映贵金属/能源比价；走阔=避险升温，股市偏空。参考中枢15-20"))
         parts = []
         for m, r in ratios:
             parts.append("%s %s" % (market._month_short(m), "%.1f" % r))
@@ -388,7 +388,7 @@ class MacroPage:
         self._render_btc(ast)
 
     def _render_btc(self, ast):
-        """比特币与金比特币（伦敦金÷比特币）：页面最后。MEXC 不可达时显示暂无。"""
+        """比特币与比金比（比特币÷伦敦金）：页面最后。MEXC 不可达时显示暂无。"""
         ast = ast or {}
         btc_m = ast.get("months", {}).get("btc", [])
         btc_v = ast.get("series", {}).get("比特币", [])
@@ -422,7 +422,7 @@ class MacroPage:
                          theme_text_color="Custom", text_color=_GREY, adaptive_height=True)
             ml.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
             card.add_widget(ml)
-        # 金比特币 = 伦敦金 ÷ 比特币（最新 + 近12月）
+        # 比金比 = 比特币 ÷ 伦敦金（最新 + 近12月 + 中枢参考）
         if gold_v and gold_m:
             gmap = dict(zip(gold_m, gold_v))
             bmap = dict(zip(btc_m, btc_v))
@@ -431,19 +431,19 @@ class MacroPage:
             for m in months:
                 g, b = gmap[m], bmap[m]
                 if g and b:
-                    ratios.append((m, g / b))
+                    ratios.append((m, b / g))
             if ratios:
                 card.add_widget(MDSeparator())
                 cur = ratios[0][1]
                 card.add_widget(MDLabel(
-                    text="[color=%s]金比特币[/color]  %.4f（%s）"
+                    text="[color=%s]比金比[/color]  %.2f（%s）"
                          % (_hex(_WHITE), cur, market._month_short(ratios[0][0])),
                     markup=True, font_style="Body2", bold=True,
                     theme_text_color="Custom", text_color=_WHITE, adaptive_height=True,
                 ))
                 card.add_widget(self._meaning_line(
-                    "=伦敦金÷比特币，代表避险/风险偏好比值；走高=避险占优，对股市偏空"))
-                rcells = ["%s %.4f" % (market._month_short(m), r) for m, r in ratios]
+                    "=比特币÷伦敦金，代表风险偏好/避险比值；走高=风险偏好占优利好股市。参考中枢15-25"))
+                rcells = ["%s %.2f" % (market._month_short(m), r) for m, r in ratios]
                 rrows = ["   ".join(rcells[j:j + 3]) for j in range(0, len(rcells), 3)]
                 rl = MDLabel(text="\n".join(rrows), font_style="Caption",
                              theme_text_color="Custom", text_color=_GREY, adaptive_height=True)
