@@ -137,7 +137,7 @@ class MacroPage:
         box = self.body
 
         box.add_widget(self._title("一、中美关键指标发布"))
-        self._render_us(d.get("us", []))
+        self._render_us(d)
 
         box.add_widget(self._title("二、PMI及细分（近12个月）"))
         pmi = d.get("pmi", {})
@@ -154,12 +154,6 @@ class MacroPage:
                                  series.get("PPI同比", []), _INFL_META["PPI同比"])
         self._render_series_card(box, "PPIRM同比", months.get("ppirm", []),
                                  series.get("PPIRM同比", []), _INFL_META["PPIRM同比"])
-        pce_note = "（更新至%s）" % months["us_pce"][-1] if months.get("us_pce") else ""
-        self._render_series_card(box, "美国核心PCE", months.get("us_pce", []),
-                                 series.get("美国核心PCE", []),
-                                 (_INFL_META["美国核心PCE"][0],
-                                  _INFL_META["美国核心PCE"][1] + pce_note,
-                                  _INFL_META["美国核心PCE"][2]))
         self._render_derived(box, market.derive_macro_inflation(series),
                              _DERIVE_META.get("inflation"))
 
@@ -184,8 +178,6 @@ class MacroPage:
         aseries = ast.get("series", {})
         self._render_series_card(box, "伦敦金", amonths.get("gold", []),
                                  aseries.get("伦敦金", []), _AST_META["伦敦金"])
-        self._render_series_card(box, "比特币", amonths.get("btc", []),
-                                 aseries.get("比特币", []), _AST_META["比特币"])
         self._render_series_card(box, "中国10年国债", amonths.get("cn10y", []),
                                  aseries.get("中国10年国债", []), _AST_META["中国10年国债"])
         self._render_series_card(box, "1年期LPR", amonths.get("lpr", []),
@@ -294,23 +286,27 @@ class MacroPage:
             fmt = m.get("fmt", _FMT_PCT2)
             meaning = m.get("meaning", "")
             formula = m.get("formula", "")
-            # 数值行：横向 BoxLayout（固定行高，label 撑满行高单行，无 markup，杜绝叠加）
+            # 数值行：横向 BoxLayout（label 固定 height，卡片高度正确累加，
+            # 无 markup，杜绝叠加）
             row = BoxLayout(
                 orientation="horizontal", size_hint_y=None, height=dp(26),
                 spacing=dp(6),
             )
             row.add_widget(MDLabel(
-                text=key, font_style="Body2", bold=True, size_hint=(0.42, 1),
+                text=market._no_break_latin(key), font_style="Body2", bold=True,
+                size_hint=(0.42, None), height=dp(26),
                 theme_text_color="Custom", text_color=_WHITE,
                 halign="left", valign="middle",
             ))
             row.add_widget(MDLabel(
-                text=fmt(v), font_style="Body2", bold=True, size_hint=(0.33, 1),
+                text=market._no_break_latin(fmt(v)), font_style="Body2", bold=True,
+                size_hint=(0.33, None), height=dp(26),
                 theme_text_color="Custom", text_color=_TITLE,
                 halign="left", valign="middle",
             ))
             row.add_widget(MDLabel(
-                text="（派生）", font_style="Caption", size_hint=(0.25, 1),
+                text="（派生）", font_style="Caption",
+                size_hint=(0.25, None), height=dp(26),
                 theme_text_color="Custom", text_color=_HINT,
                 halign="left", valign="middle",
             ))
@@ -374,7 +370,7 @@ class MacroPage:
             theme_text_color="Custom", text_color=_WHITE, adaptive_height=True,
         ))
         card.add_widget(self._meaning_line(
-            "含义：一盎司黄金可换原油桶数，反映贵金属/能源比价中枢；比值走阔=避险/抗通胀情绪升温，对股市风险偏好偏空。"))
+            "含义：一盎司黄金可换WTI桶数，反映贵金属/能源比价；走阔=避险升温，股市偏空"))
         parts = []
         for m, r in ratios:
             parts.append("%s %s" % (market._month_short(m), "%.1f" % r))
@@ -388,38 +384,108 @@ class MacroPage:
         card.add_widget(ml)
         self.body.add_widget(card)
 
-    def _render_us(self, us):
-        """一、中美关键指标发布（美国发布计划+结果；时间正向，早→晚）。
+    def _render_us(self, d):
+        """一、中美关键指标发布：中美分开；每指标显示本周期/上周期值；
+        未公布显示"待发布"提醒（避免发布对股市影响）。"""
+        us = d.get("us", [])
+        cn_sched = d.get("cn_schedule", [])
 
-        字号 Body2、行高与间距加大（用户反馈：字小显示不全 → 加大行距、
-        字号合适），固定行高单行裁剪杜绝重叠。
-        """
-        if not us:
-            self.body.add_widget(self._card_text("暂无发布日历数据"))
-            return
+        # ---- 中国部分：从月度数据取最近两期 + 下次发布提醒 ----
+        cns = self._china_rows(d)
         card = MDCard(
             orientation="vertical", padding=[dp(10), dp(8), dp(10), dp(8)],
             spacing=dp(6),
             radius=_CARD_RADIUS, elevation=0, size_hint_y=None, md_bg_color=_MAIN_BG,
         )
         card.bind(minimum_height=card.setter("height"))
+        card.add_widget(self._row([("中国", _TITLE, 1.0)], height=26, font_style="Body2"))
         card.add_widget(self._head_row(
-            [("发布", 0.18), ("指标", 0.42), ("今值", 0.20), ("前值", 0.20)]))
-        for it in us:
-            val = it.get("value")
-            prev = it.get("prev")
-            vtxt = "待发布" if val is None else ("%.2f" % float(val))
-            ptxt = ("%.2f" % float(prev)) if prev not in (None, "") else "—"
+            [("指标", 0.34), ("本周期", 0.22), ("上周期", 0.22), ("下次发布", 0.22)]))
+        sched_map = {s[0]: s[1] for s in cn_sched}   # 名称 -> "MM-DD"
+        for name, cur, prev, month in cns:
+            nx = sched_map.get(name, "")
             card.add_widget(self._row([
-                (str(it.get("date", ""))[5:], _GREY, 0.18),
-                (it.get("name", ""), _WHITE, 0.42),
-                (vtxt, _TITLE if val is None else _WHITE, 0.20),
-                (ptxt, _HINT, 0.20),
-            ], height=28, font_style="Body2"))
-        card.add_widget(self._meaning_line(
-            "说明：美国指标按发布日排序（早→晚），显示今值/前值（待发布=尚未公布）；"
-            "中国 CPI/PPI/PMI/M1/M2 最近发布结果见下方月度表。"))
+                (name, _WHITE, 0.34),
+                (cur, _TITLE, 0.22),
+                (prev, _GREY, 0.22),
+                (nx, _GREEN, 0.22),
+            ], height=30, font_style="Body2"))
+        if not cns:
+            card.add_widget(self._meaning_line("中国指标数据加载中…"))
         self.body.add_widget(card)
+
+        # ---- 美国部分：东财发布日历（发布日 + 本期/上期，未公布=待发布）----
+        if us:
+            card2 = MDCard(
+                orientation="vertical", padding=[dp(10), dp(8), dp(10), dp(8)],
+                spacing=dp(6),
+                radius=_CARD_RADIUS, elevation=0, size_hint_y=None, md_bg_color=_MAIN_BG,
+            )
+            card2.bind(minimum_height=card2.setter("height"))
+            card2.add_widget(self._row([("美国", _TITLE, 1.0)], height=26, font_style="Body2"))
+            card2.add_widget(self._head_row(
+                [("发布", 0.20), ("指标", 0.40), ("今值", 0.20), ("前值", 0.20)]))
+            for it in us:
+                val = it.get("value")
+                prev = it.get("prev")
+                vtxt = "待发布" if val is None else ("%.2f" % float(val))
+                ptxt = ("%.2f" % float(prev)) if prev not in (None, "") else "—"
+                card2.add_widget(self._row([
+                    (str(it.get("date", ""))[5:], _GREY, 0.20),
+                    (it.get("name", ""), _WHITE, 0.40),
+                    (vtxt, _TITLE if val is None else _WHITE, 0.20),
+                    (ptxt, _HINT, 0.20),
+                ], height=30, font_style="Body2"))
+            card2.add_widget(self._meaning_line(
+                "未公布（待发布）为即将到来的发布提醒；已公布显示最新值。"))
+            self.body.add_widget(card2)
+        else:
+            self.body.add_widget(self._card_text("暂无美国发布日历数据"))
+
+    def _china_rows(self, d):
+        """中国指标最近两期：(名称, 本周期, 上周期, 数据期)。"""
+        out = []
+
+        def two(series, months, fmt):
+            if not series or not months:
+                return None
+            n = min(len(series), len(months))
+            if n == 0:
+                return None
+            cur = series[-1]
+            prev = series[-2] if n > 1 else None
+            if cur is None:
+                cur = prev
+                prev = None
+            return (("%s" % fmt(cur)) if cur is not None else "—",
+                    ("%s" % fmt(prev)) if prev is not None else "—",
+                    market._month_short(months[-1]))
+
+        inf = d.get("inflation", {})
+        im = inf.get("months", {})
+        iv = inf.get("series", {})
+        liq = d.get("liquidity", {})
+        lm = liq.get("months", {})
+        lv = liq.get("series", {})
+        ast = d.get("assets", {})
+        am = ast.get("months", {})
+        av = ast.get("series", {})
+        pmi = d.get("pmi", {})
+
+        def push(name, r):
+            if r and r[0] != "—":
+                out.append((name, r[0], r[1], r[2]))
+
+        push("PMI", two(pmi.get("series", {}).get("PMI", []),
+                        pmi.get("months", []), _FMT_PCT1))
+        push("CPI同比", two(iv.get("CPI同比", []), im.get("cpi", []), _FMT_PCT1))
+        push("PPI同比", two(iv.get("PPI同比", []), im.get("ppi", []), _FMT_PCT1))
+        push("M1同比", two(lv.get("M1同比", []), lm.get("m", []), _FMT_PCT1))
+        push("M2同比", two(lv.get("M2同比", []), lm.get("m", []), _FMT_PCT1))
+        push("社融增量", two(lv.get("社融增量", []), lm.get("shrzgm", []), _FMT_YI))
+        push("新增人民币贷款", two(lv.get("新增人民币贷款", []), lm.get("loan", []), _FMT_YI))
+        push("1年期LPR", two(av.get("1年期LPR", []), am.get("lpr", []), _FMT_PCT2))
+        return out
 
     # ------------------------------------------------------------------
     # 通用控件
@@ -451,9 +517,10 @@ class MacroPage:
         )
 
     def _hint_line(self, text):
-        """小字说明行：单行（超出省略号省略显示）。"""
+        """小字说明行：单行（超出省略号省略显示）+ 数字/字母后不换行。"""
         lb = MDLabel(
-            text=text, font_style="Caption", theme_text_color="Custom",
+            text=market._no_break_latin(text), font_style="Caption",
+            theme_text_color="Custom",
             text_color=_HINT, size_hint_y=None, height=dp(18),
             valign="middle",
         )
@@ -462,9 +529,10 @@ class MacroPage:
         return lb
 
     def _meaning_line(self, text):
-        """小字说明行：自适应换行（代表含义/对经济股市影响可较长）。"""
+        """小字说明行：自适应换行（代表含义/对经济股市影响可较长）+ 数字后不换行。"""
         lb = MDLabel(
-            text=text, font_style="Caption", theme_text_color="Custom",
+            text=market._no_break_latin(text), font_style="Caption",
+            theme_text_color="Custom",
             text_color=_HINT, adaptive_height=True,
         )
         lb.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
@@ -472,11 +540,11 @@ class MacroPage:
 
     @staticmethod
     def _row(cells, height=_ROW_H, single_line=True, font_style="Body2"):
-        """固定行高的行；每个 label 撑满行高 + 单行裁剪，杜绝多行重叠。
+        """固定行高的行。
 
-        size_hint=(sx,1) 在固定高度 BoxLayout 内占满行高，text_size 绑定为
-        行内单行（超出裁剪），不再依赖 adaptive_height 纹理高度计算
-        （Adreno/KivyMD 1.1.1 上自适应高度曾导致行与行文字重叠）。
+        每个 label 用 size_hint=(sx,None)+固定 height：这样 BoxLayout 的
+        minimum_height 会累加行高（size_hint_y=1 会被忽略导致卡片高度不足、
+        行与行重叠——用户实测发布表叠加），同时 text_size 绑定单行裁剪。
         """
         r = BoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(height),
@@ -484,7 +552,8 @@ class MacroPage:
         )
         for text, color, sx in cells:
             lb = MDLabel(
-                text=text, size_hint=(sx, 1),
+                text=market._no_break_latin(text), size_hint=(sx, None),
+                height=dp(height),
                 theme_text_color="Custom", text_color=color,
                 halign="left", valign="middle", font_style=font_style,
             )
@@ -495,7 +564,7 @@ class MacroPage:
         return r
 
     def _head_row(self, cols):
-        return self._row([(c, _HINT, sx) for c, sx in cols], height=24)
+        return self._row([(c, _HINT, sx) for c, sx in cols], height=26)
 
 
 def _hex(col):
@@ -525,8 +594,6 @@ _INFL_META = {
                "代表生产端出厂价格，企业盈利风向标；回升利好周期/工业股，回落利好下游成本。", _FMT_PCT1),
     "PPIRM同比": ("工业生产者购进价格同比（上年同月=100换算）",
                  "代表上游原材料成本压力；上行压缩中游毛利，利好资源股，利空加工制造。", _FMT_PCT1),
-    "美国核心PCE": ("美国核心PCE物价指数年率（金十）",
-                   "美联储目标通胀指标，剔除食品能源；高企→加息预期→压制全球成长股与黄金。", _FMT_PCT1),
 }
 
 _LIQ_META = {
@@ -543,8 +610,6 @@ _LIQ_META = {
 _AST_META = {
     "伦敦金": ("伦敦金现货（美元/盎司，月末）",
               "避险资产；金价上涨反映避险/抗通胀情绪，股市风险偏好下降时同涨。", _FMT_GOLD),
-    "比特币": ("BTC/USDT 收盘（美元，月末，MEXC）",
-              "数字资产，风险偏好风向标；上涨代表资金风险偏好提升，利好科技股。", _FMT_BTC),
     "中国10年国债": ("中债10年期国债收益率（%）",
                    "无风险利率基准，资产定价锚；上行压制股市估值，下行利好成长。", _FMT_PCT3),
     "1年期LPR": ("贷款市场报价利率 1 年期（%）",
@@ -577,9 +642,6 @@ _DERIVE_META = {
                          "fmt": _FMT_PCT1},
     },
     "assets": {
-        "金比特币": {"formula": "伦敦金÷比特币",
-                     "meaning": "代表避险/风险偏好比值；走高=避险占优，对股市偏空。",
-                     "fmt": _FMT_RATIO},
         "中国实际利率": {"formula": "1年期LPR−一线新房同比",
                          "meaning": "代表融资真实成本（房价涨幅近似通胀）；偏高压制投资与估值。",
                          "fmt": _FMT_PCT1},
