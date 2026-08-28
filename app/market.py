@@ -274,17 +274,22 @@ _NO_BREAK_RE = None
 
 
 def _no_break_latin(text):
-    """在 拉丁字母/数字 与 CJK 边界插入不换行空格(\u00A0)。
+    """在 拉丁字母/数字 与 CJK（含全角标点）边界插入不换行空格(\u00A0)。
 
-    需求：标题不要在数字、字母后突然新起一行（Kivy 在 CJK↔Latin 边界可断行）。
-    把 "涨10% "、"ETF 半导体" 等位置的边界字符改为 \u00A0（Kivy 不在此断行）。
+    需求：数字、字母后面不要换行（Kivy 在 CJK↔Latin 边界可断行，且
+    拉丁后接全角标点如"ETF）"也常被断行）。\u00A0 显示为普通空格宽度，
+    但 Kivy 不会在它处断行。
     """
     global _NO_BREAK_RE
     if _NO_BREAK_RE is None:
-        _NO_BREAK_RE = re.compile(r"([A-Za-z0-9%.\-+,./$¥])\s*([\u4e00-\u9fff])")
+        # 正向：拉丁/数字/符号 后接 汉字或全角标点 → 插 \u00A0
+        #   （"ETF）"、"10%，" 等边界防断行；\u00A0 显示为空格宽度）
+        _NO_BREAK_RE = re.compile(
+            r"([A-Za-z0-9%.\-+,./$¥:;])\s*([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef])")
     out = _NO_BREAK_RE.sub(lambda m: m.group(1) + "\u00A0" + m.group(2), text or "")
-    # 反向：CJK 后紧跟 Latin（如 "指数ETF"）也防断行
-    _NO_BREAK_RE2 = re.compile(r"([\u4e00-\u9fff])\s*([A-Za-z0-9%])")
+    # 反向：汉字/全角标点 后紧跟 拉丁/数字（"指数ETF"、"：2026"）防断行
+    _NO_BREAK_RE2 = re.compile(
+        r"([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef])\s*([A-Za-z0-9%])")
     out = _NO_BREAK_RE2.sub(lambda m: m.group(1) + "\u00A0" + m.group(2), out)
     return out
 
@@ -1137,17 +1142,7 @@ def _sec_macro_inflation():
         data["sources"]["国家统计局"] = True
     except Exception as e:  # noqa: BLE001
         data["errors"].append("PPIRM：%s" % e)
-    try:
-        t = int(time.time() * 1000)
-        text = _get_text(sess, JIN10_LIST, params={"category": "ec", "attr_id": "80", "_": str(t)},
-                         headers=JIN10_H, tries=2, pause=0.6)
-        p = parse_jin10(text)
-        if p:
-            data["series"]["美国核心PCE"] = [p["value"]]
-            data["months"]["us_pce"] = [p["date"][:7]]
-            data["sources"]["金十"] = True
-    except Exception as e:  # noqa: BLE001
-        data["errors"].append("美国核心PCE：%s" % e)
+    # 注：美国核心PCE 已移至"中美关键指标发布"（金十源滞后，不单独成行）
     return data
 
 
@@ -1219,15 +1214,7 @@ def _sec_macro_assets():
         data["sources"]["新浪"] = True
     except Exception as e:  # noqa: BLE001
         data["errors"].append("WTI：%s" % e)
-    try:
-        text = _get_text(sess, MEXC_KLINE, params={
-            "symbol": "BTCUSDT", "interval": "1d", "limit": "400"}, tries=2, pause=0.6)
-        out = _monthly_last(parse_mexc_kline(text, 400))
-        data["months"]["btc"] = [m for m, _v in out]
-        data["series"]["比特币"] = [v for _m, v in out]
-        data["sources"]["MEXC"] = True
-    except Exception as e:  # noqa: BLE001
-        data["errors"].append("比特币：%s" % e)
+    # 注：比特币（MEXC）在手机网络不可达，按需求删除该指标
     try:
         rows = parse_em_rows(_em_get(
             sess, "RPTA_WEB_TREASURYYIELD", "ALL", sort="SOLAR_DATE",
@@ -1316,10 +1303,44 @@ def _quarter_shift(month_key, delta):
         return None
 
 
+def china_release_schedule(now=None):
+    """中国关键指标下次预计发布时间（按常规发布规律推算，纯函数可测试）。
+
+    返回 [(指标, 下次日期"MM-DD", 对应数据期说明)]，按日期排序。
+    规律（遇节假日顺延，此处按常规日近似）：
+      - 官方制造业PMI：每月 1 日发布上月
+      - CPI / PPI：次月 9 日发布上月
+      - 社融增量 / M1 / M2 / 新增人民币贷款：次月 15 日前（央行月中发布）
+      - 1年期 LPR：每月 20 日
+    """
+    now = now or _cn_now()
+    y, m = now.year, now.month
+
+    def _next(day, data_desc):
+        """今天 ≤ 本月 day 日 → 本月 day 日（发布 data_desc）；否则下月 day 日。"""
+        if now.day <= day:
+            return "%02d-%02d" % (m, day), data_desc
+        ny, nm = (y + 1, 1) if m == 12 else (y, m + 1)
+        return "%02d-%02d" % (nm, day), data_desc
+
+    cur = "%d-%02d" % (y, m)
+    entries = [
+        ("PMI", *_next(1, "%s月数据" % "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1)))),
+        ("CPI", *_next(9, "%s月数据" % "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1)))),
+        ("PPI", *_next(9, "%s月数据" % "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1)))),
+        ("社融增量", *_next(15, "%s月数据" % "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1)))),
+        ("M1/M2", *_next(15, "%s月数据" % "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1)))),
+        ("新增人民币贷款", *_next(15, "%s月数据" % "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1)))),
+        ("1年期LPR", *_next(20, "%s月报价" % cur)),
+    ]
+    return entries
+
+
 def _sec_macro_usdata():
-    """六、中美关键指标发布：东财美国经济数据（发布计划 + 结果，白名单）。"""
+    """六、中美关键指标发布：东财美国经济数据（发布计划 + 结果，白名单）
+    + 中国关键指标下次预计发布时间（按常规发布规律推算，无网络）。"""
     sess = _session()
-    data = {"errors": [], "us": []}
+    data = {"errors": [], "us": [], "cn_schedule": []}
     try:
         rows = parse_em_rows(_em_get(
             sess, "RPT_ECONOMICVALUE_USA", "ALL",
@@ -1343,6 +1364,27 @@ def _sec_macro_usdata():
         data["sources"] = {"东方财富": True}
     except Exception as e:  # noqa: BLE001
         data["errors"].append("美国指标：%s" % e)
+    try:
+        data["cn_schedule"] = china_release_schedule()
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        # 美国核心PCE（金十源，免费层滞后）：并入发布表展示，标注数据月份
+        t = int(time.time() * 1000)
+        text = _get_text(sess, JIN10_LIST, params={"category": "ec", "attr_id": "80", "_": str(t)},
+                         headers=JIN10_H, tries=2, pause=0.6)
+        p = parse_jin10(text)
+        if p:
+            data["us"].append({
+                "date": p["date"],
+                "name": "美国核心PCE物价指数年率（金十，更新至%s）" % p["date"][:7],
+                "value": p["value"],
+                "prev": p.get("prev"),
+                "period": "",
+            })
+            data["sources"]["金十"] = True
+    except Exception:  # noqa: BLE001
+        pass
     return data
 
 
@@ -1385,6 +1427,7 @@ def _new_macro_state():
         "liquidity": {"months": {}, "series": {}},
         "assets": {"months": {}, "series": {}, "extra": {}},
         "us": [],
+        "cn_schedule": [],
         "commodity": {"dates": [], "gold": [], "wti": [], "ratio": []},
         "errors": [],
     }
@@ -1403,6 +1446,7 @@ def _merge_macro(out, key, data):
                          "extra": data.get("extra", {})}
     elif key == "macro_usdata":
         out["us"] = data.get("us", [])
+        out["cn_schedule"] = data.get("cn_schedule", [])
     elif key == "macro_commodity":
         out["commodity"] = {k: data.get(k, []) for k in
                             ("dates", "gold", "wti", "ratio")}
@@ -1584,16 +1628,12 @@ def derive_macro_liquidity(series):
 
 
 def derive_macro_assets(series, extra):
-    """资产价格派生：金比特币 / 中国实际利率 / GDP平减指数。
+    """资产价格派生：中国实际利率 / GDP平减指数。
 
-    series: {"伦敦金","比特币","中国10年国债","1年期LPR": [值...]}
+    series: {"伦敦金","中国10年国债","1年期LPR": [值...]}
     extra: {"house_yoy","gdp_nominal_yoy","gdp_real_yoy"}
     """
     out = {}
-    g = (series.get("伦敦金") or [])
-    b = (series.get("比特币") or [])
-    if g and b and g[-1] and b[-1]:
-        out["金比特币"] = g[-1] / b[-1]
     lpr = (series.get("1年期LPR") or [])
     hy = extra.get("house_yoy")
     if lpr and lpr[-1] is not None and hy is not None:
