@@ -200,7 +200,12 @@ class MarketPage:
         self.ts_label.text = "更新于：刷新中…"
         self.turnover_label.text = "两市成交额：查询中…"
         self.median_label.text = "沪深300中位数：查询中…"
-        self.news_label.text = "查询中…"
+        self.news_card.clear_widgets()
+        self.news_card.spacing = 0
+        self.news_card.add_widget(MDLabel(
+            text="查询中…", font_style="Body2",
+            theme_text_color="Custom", text_color=_GREY, adaptive_height=True,
+        ))
 
         # 指数/品种表格：表头 + 占位行
         self.quotes_box.clear_widgets()
@@ -306,27 +311,60 @@ class MarketPage:
         self.median_label.text = "  ·  ".join(med_parts)
 
     def _render_news(self, news):
-        """财经消息：序号【01】~【10】（蓝色，点击打开详情）+ 标题纯文本。
+        """财经消息：每条一行「【序号】蓝色链接 + 标题正文」。
 
-        去掉●；链接只放在序号中；标题不展开、不做超链接；行距适当拉开；
-        数字/字母后不换行（需求）。
-        news: [(create_time, rich_text, docurl)]。
+        序号与标题拆分为两个 label：序号用 markup（大字号便于点击）；
+        标题用纯文本 label（无 markup），\u00A0 不换行空格在纯文本模式下
+        可靠生效，正文不会因英文/数字换行（用户实测 markup 模式仍断行）。
+        news: [(create_time, rich_text, docurl)]，最多 10 条。
         """
         if not news:
-            self.news_label.text = "暂无财经消息"
+            self.news_card.clear_widgets()
+            self.news_card.add_widget(MDLabel(
+                text="暂无财经消息", font_style="Body2",
+                theme_text_color="Custom", text_color=_GREY, adaptive_height=True,
+            ))
             return
-        lines = []
+        self.news_card.clear_widgets()
+        self.news_card.spacing = dp(10)
         for i, (_ct, text, url) in enumerate(news[:10], 1):
+            title = market._no_break_latin(str(text or "").strip())
+            if not title:
+                continue
+            row = BoxLayout(
+                orientation="horizontal", size_hint_y=None, spacing=dp(4),
+            )
+            row.bind(minimum_height=row.setter("height"))
             seq = "【%02d】" % i
-            title = market._no_break_latin(text)
             if url and url.startswith("http"):
-                lines.append("[ref=%s][color=%s]%s[/color][/ref] %s"
-                             % (url, _hex(_HIST_TITLE_COLOR), seq, title))
+                seq_lb = MDLabel(
+                    text="[ref=%s][size=19][color=%s]%s[/color][/size][/ref]"
+                         % (url, _hex(_HIST_TITLE_COLOR), seq),
+                    markup=True, font_style="Body2",
+                    theme_text_color="Custom", text_color=_HIST_TITLE_COLOR,
+                    size_hint=(None, None), width=dp(64),
+                    halign="left", valign="top",
+                )
+                seq_lb.bind(on_ref_press=self._open_news_link)
             else:
-                lines.append("[color=%s]%s[/color] %s"
-                             % (_hex(_HIST_TITLE_COLOR), seq, title))
-        # 空行拉开行距（markup 里 \n\n 生效）
-        self.news_label.text = "\n\n".join(lines)
+                seq_lb = MDLabel(
+                    text="[size=19][color=%s]%s[/color][/size]"
+                         % (_hex(_HINT), seq),
+                    markup=True, font_style="Body2",
+                    theme_text_color="Custom", text_color=_HINT,
+                    size_hint=(None, None), width=dp(64),
+                    halign="left", valign="top",
+                )
+            title_lb = MDLabel(
+                text=title, font_style="Body2",
+                theme_text_color="Custom", text_color=_GREY,
+                size_hint=(1, None), adaptive_height=True,
+                halign="left", valign="top",
+            )
+            title_lb.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
+            row.add_widget(seq_lb)
+            row.add_widget(title_lb)
+            self.news_card.add_widget(row)
 
     def _render_hist_field(self, key, rows):
         """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。
