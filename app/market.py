@@ -75,7 +75,11 @@ def _cn_now():
 
 
 def elapsed_trade_minutes(now=None):
-    """当日已交易分钟数：开盘前 0，收盘后 240，盘中按当前时刻。"""
+    """当日已交易分钟数：开盘前 0，收盘后 240，盘中按当前时刻。
+
+    修复：11:30-13:00 午休返回 120（上午已结束），否则午休期间会落入
+    下午分支算出错误分钟数（如 11:34 算出 34 分钟 → 预测额严重虚高）。
+    """
     now = now or _cn_now()
     t = now.time()
     if now.weekday() >= 5 or t < dtime(*SESSION_START):
@@ -84,6 +88,8 @@ def elapsed_trade_minutes(now=None):
         return TOTAL_TRADE_MINUTES
     if t <= dtime(11, 30):
         return (t.hour * 60 + t.minute) - (SESSION_START[0] * 60 + SESSION_START[1])
+    if t <= dtime(13, 0):   # 午休（11:30-13:00）返回 120：上午已结束
+        return 120.0
     return 120.0 + (t.hour * 60 + t.minute) - (13 * 60)
 
 
@@ -916,6 +922,11 @@ MEXC_KLINE = "https://api.mexc.com/api/v3/klines"
 JIN10_LIST = "https://datacenter-api.jin10.com/reports/list_v2"
 JIN10_H = {"x-app-id": "rU6QIu7JHe2gOUeR", "x-csrf-token": "x-csrf-token", "x-version": "1.0.0"}
 MOFCOM_SHRZGM = "https://data.mofcom.gov.cn/datamofcom/front/gnmy/shrzgmQuery"
+# 中国人民银行：社会融资规模增量统计表（列表页 → htm 附件 → 表格）
+PBC_BASE = "http://www.pbc.gov.cn"
+PBC_REF = PBC_BASE + "/diaochatongjisi/"
+PBC_SHRZGM = (PBC_BASE +
+              "/diaochatongjisi/116219/116319/2026ntjsj/shrzgm/index.html")
 
 MACRO_MONTHS = 12          # 宏观数据展示月份数（需求：近 12 个月）
 MACRO_COMMODITY_DAYS = 5   # 大宗商品近 5 日（需求保留）
@@ -1044,6 +1055,31 @@ def parse_mofcom_shrzgm(text, n=MACRO_MONTHS):
     return list(reversed(out[-n:]))
 
 
+def parse_pbc_shrzgm(text):
+    """解析央行"社会融资规模增量统计表" htm → [(month_key, 社融增量亿元, 新增人民币贷款亿元)] 升序。
+
+    表格行格式："2026.07 | 14017 | -5896 | 85 | ..."，第一列日期、第二列
+    社会融资规模增量(AFRE flow)、第三列人民币贷款（单位：亿元）。
+    """
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", text, re.S)
+    out = []
+    for r in rows:
+        cells = [re.sub(r"<[^>]+>", "", c).strip()
+                 for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", r, re.S)]
+        cells = [c for c in cells if c and c not in ("", "\xa0")]
+        if not cells:
+            continue
+        m = re.match(r"(\d{4})\.(\d{2})", cells[0])
+        if not m:
+            continue
+        mk = "%s-%s" % (m.group(1), m.group(2))
+        afre = _f(cells[1]) if len(cells) > 1 else 0.0
+        loan = _f(cells[2]) if len(cells) > 2 else 0.0
+        if afre:
+            out.append((mk, afre, loan))
+    return out
+
+
 def _em_get(sess, report, columns, sort="REPORT_DATE", extra=None,
             ref="https://data.eastmoney.com/cjsj/", token=None):
     """东财 datacenter-web 通用抓取。"""
@@ -1147,7 +1183,11 @@ def _sec_macro_inflation():
 
 
 def _sec_macro_liquidity():
-    """三、流动性（近12月）：M1/M2、新增人民币贷款（东财）+ 社融增量（商务部）。"""
+    """三、流动性（近12月）：M1/M2（东财）+ 社融增量/新增人民币贷款（央行）。
+
+    社融用中国人民银行"社会融资规模增量统计表"（htm），最新到当月（比
+    商务部源领先 3-4 个月）；新增人民币贷款为央行表第三列（与东财一致）。
+    """
     sess = _session()
     data = {"errors": [], "months": {}, "series": {}}
     try:
@@ -1163,21 +1203,30 @@ def _sec_macro_liquidity():
     except Exception as e:  # noqa: BLE001
         data["errors"].append("货币供应：%s" % e)
     try:
-        rows = parse_em_rows(_em_get(sess, "RPT_ECONOMY_RMB_LOAN", "REPORT_DATE,TIME,RMB_LOAN"))
-        out = _latest_month_values(rows, "RMB_LOAN")
-        data["months"]["loan"] = [m for m, _v in out]
-        data["series"]["新增人民币贷款"] = [v for _m, v in out]
-    except Exception as e:  # noqa: BLE001
-        data["errors"].append("新增贷款：%s" % e)
-    try:
-        r = sess.post(MOFCOM_SHRZGM, timeout=12, headers={"Accept": "application/json, text/plain, */*"})
+        # 央行社融增量统计表（含 新增人民币贷款 列）
+        r = sess.get(PBC_SHRZGM, timeout=12,
+                     headers={"User-Agent": UA, "Referer": PBC_REF})
         r.raise_for_status()
-        out = parse_mofcom_shrzgm(r.text)
-        data["months"]["shrzgm"] = [m for m, _v in out]
-        data["series"]["社融增量"] = [v for _m, v in out]
-        data["sources"]["商务部"] = True
+        h = r.content.decode("gbk", "replace")
+        m = re.search(r'href="([^"]+\.htm)"[^>]*>\s*htm', h)
+        if not m:
+            raise RuntimeError("央行社融表链接未找到")
+        rel = m.group(1)
+        data_url = PBC_BASE + (rel if rel.startswith("/") else "/" + rel)
+        r2 = sess.get(data_url, timeout=12, headers={"User-Agent": UA, "Referer": PBC_REF})
+        r2.raise_for_status()
+        out = parse_pbc_shrzgm(r2.content.decode("gbk", "replace"))
+        if out:
+            data["months"]["shrzgm"] = [mk for mk, _a, _l in out]
+            data["series"]["社融增量"] = [a for _mk, a, _l in out]
+            data["months"]["loan"] = [mk for mk, _a, _l in out]
+            data["series"]["新增人民币贷款"] = [
+                l if l is not None else 0.0 for _mk, _a, l in out]
+            data["sources"]["中国人民银行"] = True
+        else:
+            raise RuntimeError("央行社融表无数据")
     except Exception as e:  # noqa: BLE001
-        data["errors"].append("社融：%s" % e)
+        data["errors"].append("社融/贷款：%s" % e)
     return data
 
 
@@ -1214,7 +1263,16 @@ def _sec_macro_assets():
         data["sources"]["新浪"] = True
     except Exception as e:  # noqa: BLE001
         data["errors"].append("WTI：%s" % e)
-    # 注：比特币（MEXC）在手机网络不可达，按需求删除该指标
+    try:
+        # 比特币（MEXC；手机网络不可达时该项留空，不影响其它指标）
+        text = _get_text(sess, MEXC_KLINE, params={
+            "symbol": "BTCUSDT", "interval": "1d", "limit": "400"}, tries=2, pause=0.6)
+        out = _monthly_last(parse_mexc_kline(text, 400))
+        data["months"]["btc"] = [m for m, _v in out]
+        data["series"]["比特币"] = [v for _m, v in out]
+        data["sources"]["MEXC"] = True
+    except Exception:  # noqa: BLE001 网络不可达 → 留空
+        pass
     try:
         rows = parse_em_rows(_em_get(
             sess, "RPTA_WEB_TREASURYYIELD", "ALL", sort="SOLAR_DATE",
@@ -1306,7 +1364,7 @@ def _quarter_shift(month_key, delta):
 def china_release_schedule(now=None):
     """中国关键指标下次预计发布时间（按常规发布规律推算，纯函数可测试）。
 
-    返回 [(指标, 下次日期"MM-DD", 对应数据期说明)]，按日期排序。
+    返回 [(指标名(与发布表中国行一致), 下次日期"MM-DD", 数据期说明)]。
     规律（遇节假日顺延，此处按常规日近似）：
       - 官方制造业PMI：每月 1 日发布上月
       - CPI / PPI：次月 9 日发布上月
@@ -1315,22 +1373,24 @@ def china_release_schedule(now=None):
     """
     now = now or _cn_now()
     y, m = now.year, now.month
+    prev_m = "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1))
 
-    def _next(day, data_desc):
-        """今天 ≤ 本月 day 日 → 本月 day 日（发布 data_desc）；否则下月 day 日。"""
+    def _next(day, desc):
+        """今天 ≤ 本月 day 日 → 本月 day 日（发布 desc）；否则下月 day 日。"""
         if now.day <= day:
-            return "%02d-%02d" % (m, day), data_desc
+            return "%02d-%02d" % (m, day), desc
         ny, nm = (y + 1, 1) if m == 12 else (y, m + 1)
-        return "%02d-%02d" % (nm, day), data_desc
+        return "%02d-%02d" % (nm, day), desc
 
     cur = "%d-%02d" % (y, m)
     entries = [
-        ("PMI", *_next(1, "%s月数据" % "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1)))),
-        ("CPI", *_next(9, "%s月数据" % "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1)))),
-        ("PPI", *_next(9, "%s月数据" % "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1)))),
-        ("社融增量", *_next(15, "%s月数据" % "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1)))),
-        ("M1/M2", *_next(15, "%s月数据" % "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1)))),
-        ("新增人民币贷款", *_next(15, "%s月数据" % "%d-%02d" % ((y - 1, 12) if m == 1 else (y, m - 1)))),
+        ("PMI", *_next(1, "%s月数据" % prev_m)),
+        ("CPI同比", *_next(9, "%s月数据" % prev_m)),
+        ("PPI同比", *_next(9, "%s月数据" % prev_m)),
+        ("社融增量", *_next(15, "%s月数据" % prev_m)),
+        ("M1同比", *_next(15, "%s月数据" % prev_m)),
+        ("M2同比", *_next(15, "%s月数据" % prev_m)),
+        ("新增人民币贷款", *_next(15, "%s月数据" % prev_m)),
         ("1年期LPR", *_next(20, "%s月报价" % cur)),
     ]
     return entries
@@ -1628,12 +1688,16 @@ def derive_macro_liquidity(series):
 
 
 def derive_macro_assets(series, extra):
-    """资产价格派生：中国实际利率 / GDP平减指数。
+    """资产价格派生：金比特币 / 中国实际利率 / GDP平减指数。
 
-    series: {"伦敦金","中国10年国债","1年期LPR": [值...]}
+    series: {"伦敦金","比特币","中国10年国债","1年期LPR": [值...]}
     extra: {"house_yoy","gdp_nominal_yoy","gdp_real_yoy"}
     """
     out = {}
+    g = (series.get("伦敦金") or [])
+    b = (series.get("比特币") or [])
+    if g and b and g[-1] and b[-1]:
+        out["金比特币"] = g[-1] / b[-1]
     lpr = (series.get("1年期LPR") or [])
     hy = extra.get("house_yoy")
     if lpr and lpr[-1] is not None and hy is not None:
