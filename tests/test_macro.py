@@ -149,15 +149,62 @@ def test_derive_macro_liquidity():
 
 
 def test_derive_macro_assets():
-    series = {"伦敦金": [4000.0, 4641.0], "1年期LPR": [3.1, 3.0]}
+    series = {"伦敦金": [4000.0, 4641.0], "比特币": [70000.0, 79015.0],
+              "1年期LPR": [3.1, 3.0]}
     extra = {"house_yoy": -2.3, "gdp_nominal_yoy": 4.7, "gdp_real_yoy": 3.2}
     d = market.derive_macro_assets(series, extra)
-    assert "金比特币" not in d                     # 比特币已删除（手机网络不可达）
+    assert abs(d["金比特币"] - 4641.0 / 79015.0) < 1e-9     # 已恢复
     assert abs(d["中国实际利率"] - (3.0 - (-2.3))) < 1e-9   # 5.3
     assert abs(d["GDP平减指数"] - 1.5) < 1e-9
     # 缺房价 → 无实际利率
     d2 = market.derive_macro_assets(series, {"gdp_nominal_yoy": 4.7, "gdp_real_yoy": 3.2})
     assert "中国实际利率" not in d2
+
+
+def test_parse_pbc_shrzgm():
+    # 央行社融表 htm：第一列日期、第二列社融增量、第三列人民币贷款
+    t = ("<html><body><table>"
+         "<tr><td>项目</td><td>AFRE(flow)</td><td>RMB loans</td></tr>"
+         "<tr><td>2026.06</td><td>33671</td><td>17650</td></tr>"
+         "<tr><td>2026.07</td><td>14017</td><td>-5896</td></tr>"
+         "<tr><td>2026.08</td><td>&nbsp;</td><td>&nbsp;</td></tr>"
+         "</table></body></html>")
+    out = market.parse_pbc_shrzgm(t)
+    assert out == [("2026-06", 33671.0, 17650.0), ("2026-07", 14017.0, -5896.0)]
+    assert market.parse_pbc_shrzgm("no table") == []
+
+
+def test_elapsed_trade_minutes_lunch_break():
+    # 午休 11:30-13:00 应返回 120（上午已结束），修复前 11:34 会算出 34
+    from datetime import datetime
+    tz = __import__("datetime").timezone(__import__("datetime").timedelta(hours=8))
+    now = datetime(2026, 8, 27, 11, 34, tzinfo=tz)   # 周四午休
+    assert market.elapsed_trade_minutes(now) == 120.0
+    now2 = datetime(2026, 8, 27, 12, 30, tzinfo=tz)
+    assert market.elapsed_trade_minutes(now2) == 120.0
+    now3 = datetime(2026, 8, 27, 13, 30, tzinfo=tz)
+    assert market.elapsed_trade_minutes(now3) == 150.0   # 下午 30 分钟
+    now4 = datetime(2026, 8, 27, 10, 0, tzinfo=tz)
+    assert market.elapsed_trade_minutes(now4) == 30.0
+
+
+def test_china_release_schedule_names():
+    # 发布表中国行名称与下次发布名称一致（否则"下次发布"列空白）
+    sched = market.china_release_schedule()
+    names = {s[0] for s in sched}
+    assert "CPI同比" in names
+    assert "PPI同比" in names
+    assert "M1同比" in names and "M2同比" in names
+    assert "社融增量" in names and "新增人民币贷款" in names
+    assert "1年期LPR" in names and "PMI" in names
+    # 8月27日：CPI 下次 = 09-09（发布7月数据）
+    from datetime import datetime
+    tz = __import__("datetime").timezone(__import__("datetime").timedelta(hours=8))
+    s2 = dict((s[0], (s[1], s[2])) for s in market.china_release_schedule(
+        datetime(2026, 8, 27, 12, 0, tzinfo=tz)))
+    assert s2["CPI同比"][0] == "09-09"
+    assert "7月数据" in s2["CPI同比"][1]
+    assert s2["PMI"][0] == "09-01"
 
 
 def test_macro_constants():
