@@ -312,13 +312,10 @@ class MarketPage:
         self.median_label.text = "  ·  ".join(med_parts)
 
     def _render_news(self, news):
-        """财经消息：每条一行「【序号】蓝色链接 + 标题正文」连续排版。
+        """财经消息：去掉序号；每条 = 标题行【标题】(蓝色链接) + 正文行(另起一行)。
 
-        序号与标题拆为两个 label 零间距拼接：序号 label 用 markup（链接，
-        字号与正文一致，用户反馈 [size=] 标签用 px 导致序号过小）；
-        标题用纯文本 label（无 markup），\u00A0 不换行空格可靠生效，
-        正文不会因英文/数字无规律断行。
-        news: [(create_time, rich_text, docurl)]，最多 10 条。
+        正文 ≤100 字、纯文本 label（\u00A0 可靠生效 → 不在字母/数字后断行，
+        仅因宽度自然换行）；无标题的新闻忽略。news: [(时间, rich_text, url)]。
         """
         if not news:
             self.news_card.clear_widgets()
@@ -330,43 +327,54 @@ class MarketPage:
             return
         self.news_card.clear_widgets()
         self.news_card.spacing = dp(8)
-        for i, (_ct, text, url) in enumerate(news[:10], 1):
-            title = market._no_break_latin(str(text or "").strip())
+        shown = 0
+        for _ct, text, url in news[:10]:
+            title, body = market.split_news_title(text)
             if not title:
-                continue
-            row = BoxLayout(
-                orientation="horizontal", size_hint_y=None, spacing=dp(0),
+                continue   # 无标题 → 忽略该新闻
+            item = MDBoxLayout(
+                orientation="vertical", size_hint_y=None, spacing=dp(1),
             )
-            row.bind(minimum_height=row.setter("height"))
-            seq = "【%02d】" % i
+            item.bind(minimum_height=item.setter("height"))
             if url and url.startswith("http"):
-                seq_lb = MDLabel(
-                    text="[ref=%s][color=%s]%s[/color][/ref]"
-                         % (url, _hex(_HIST_TITLE_COLOR), seq),
+                title_lb = MDLabel(
+                    text="[ref=%s][color=%s]【%s】[/color][/ref]"
+                         % (url, _hex(_HIST_TITLE_COLOR), title),
                     markup=True, font_style="Body2",
                     theme_text_color="Custom", text_color=_HIST_TITLE_COLOR,
-                    size_hint=(None, None), width=dp(56),
+                    size_hint=(1, None), adaptive_height=True,
                     halign="left", valign="top",
                 )
-                seq_lb.bind(on_ref_press=self._open_news_link)
+                title_lb.bind(on_ref_press=self._open_news_link)
             else:
-                seq_lb = MDLabel(
-                    text="[color=%s]%s[/color]" % (_hex(_HINT), seq),
+                title_lb = MDLabel(
+                    text="[color=%s]【%s】[/color]"
+                         % (_hex(_HIST_TITLE_COLOR), title),
                     markup=True, font_style="Body2",
-                    theme_text_color="Custom", text_color=_HINT,
-                    size_hint=(None, None), width=dp(56),
+                    theme_text_color="Custom", text_color=_HIST_TITLE_COLOR,
+                    size_hint=(1, None), adaptive_height=True,
                     halign="left", valign="top",
                 )
-            title_lb = MDLabel(
-                text=title, font_style="Body2",
-                theme_text_color="Custom", text_color=_GREY,
-                size_hint=(1, None), adaptive_height=True,
-                halign="left", valign="top",
-            )
-            title_lb.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
-            row.add_widget(seq_lb)
-            row.add_widget(title_lb)
-            self.news_card.add_widget(row)
+            item.add_widget(title_lb)
+            if body:
+                # 正文另起一行，纯文本 → 字母/数字后不换行（仅宽度自然换行）
+                body_lb = MDLabel(
+                    text=market._no_break_latin(body), font_style="Body2",
+                    theme_text_color="Custom", text_color=_GREY,
+                    size_hint=(1, None), adaptive_height=True,
+                    halign="left", valign="top",
+                )
+                body_lb.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
+                item.add_widget(body_lb)
+            self.news_card.add_widget(item)
+            shown += 1
+            if shown >= 10:
+                break
+        if shown == 0:
+            self.news_card.add_widget(MDLabel(
+                text="暂无财经消息", font_style="Body2",
+                theme_text_color="Custom", text_color=_GREY, adaptive_height=True,
+            ))
 
     def _render_hist_field(self, key, rows):
         """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。
@@ -394,7 +402,7 @@ class MarketPage:
         xmap = dict(xau_rows)
         wmap = dict(wti_rows)
         bmap = dict(btc_rows)
-        dates = sorted(set(xmap) & set(wmap))[-5:]
+        dates = sorted(set(xmap) & set(wmap))[-5:][::-1]   # 倒序：最新在前（需求）
         if not dates:
             self.hist_box.add_widget(self._row([("暂无数据", _HINT, 1.0)]))
             return
@@ -458,7 +466,7 @@ class MarketPage:
             self.hist_box.add_widget(self._row([("暂无数据", _HINT, 1.0)]))
             return
         self.hist_box.add_widget(self._head_row([("日期", 0.5), ("数值", 0.5)]))
-        for d, v in rows:
+        for d, v in reversed(rows):   # 倒序：最新在前（需求）
             self.hist_box.add_widget(self._row([
                 (d[5:] if len(d) > 5 else d, _GREY, 0.5),
                 (fmt(v), _WHITE, 0.5),
