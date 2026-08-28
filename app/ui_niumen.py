@@ -30,7 +30,7 @@ try:
 except ImportError:  # KivyMD 1.1.x 的旧路径
     from kivymd.uix.picker import MDDatePicker
 
-from . import api, config, indicator, interpreter
+from . import api, config, indicator, interpreter, market
 from .chart import DateAxis, NMLChart, VolumePanel
 
 CARD_RADIUS = [dp(14), dp(14), dp(14), dp(14)]
@@ -377,6 +377,8 @@ class NiumenPage:
             "25%\u00A0总额。",
             "规则3\u00A0快卖出：突破止盈线卖出，并结合其它趋势判断卖出额度。",
         ]
+        # 数字/字母后不换行兜底（YLX/15%等边界）
+        rules = [market._no_break_latin(r) for r in rules]
         for r in rules:
             lb = MDLabel(
                 text=r, font_style="Caption",
