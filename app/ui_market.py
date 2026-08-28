@@ -311,15 +311,15 @@ class MarketPage:
         self.median_label.text = "  ·  ".join(med_parts)
 
     def _render_news(self, news):
-        """财经消息：每条一行「【序号】蓝色链接 + 标题正文」。
+        """财经消息：单段连续「【序号】蓝色链接 + 标题正文」；序号加大便于点击。
 
-        序号与标题拆分为两个 label：序号用 markup（大字号便于点击）；
-        标题用纯文本 label（无 markup），\u00A0 不换行空格在纯文本模式下
-        可靠生效，正文不会因英文/数字换行（用户实测 markup 模式仍断行）。
+        序号与标题在同一 label 内连续排版（需求：不要分两列）；序号用 markup
+        ref 链接（大字号 21sp 蓝色）；标题/正文跟在序号后，数字字母后不换行。
         news: [(create_time, rich_text, docurl)]，最多 10 条。
         """
         if not news:
             self.news_card.clear_widgets()
+            self.news_card.spacing = 0
             self.news_card.add_widget(MDLabel(
                 text="暂无财经消息", font_style="Body2",
                 theme_text_color="Custom", text_color=_GREY, adaptive_height=True,
@@ -327,44 +327,24 @@ class MarketPage:
             return
         self.news_card.clear_widgets()
         self.news_card.spacing = dp(10)
+        lines = []
         for i, (_ct, text, url) in enumerate(news[:10], 1):
             title = market._no_break_latin(str(text or "").strip())
             if not title:
                 continue
-            row = BoxLayout(
-                orientation="horizontal", size_hint_y=None, spacing=dp(4),
-            )
-            row.bind(minimum_height=row.setter("height"))
             seq = "【%02d】" % i
             if url and url.startswith("http"):
-                seq_lb = MDLabel(
-                    text="[ref=%s][size=19][color=%s]%s[/color][/size][/ref]"
-                         % (url, _hex(_HIST_TITLE_COLOR), seq),
-                    markup=True, font_style="Body2",
-                    theme_text_color="Custom", text_color=_HIST_TITLE_COLOR,
-                    size_hint=(None, None), width=dp(64),
-                    halign="left", valign="top",
-                )
-                seq_lb.bind(on_ref_press=self._open_news_link)
+                head = ("[ref=%s][size=21][color=%s]%s[/color][/size][/ref]"
+                        % (url, _hex(_HIST_TITLE_COLOR), seq))
             else:
-                seq_lb = MDLabel(
-                    text="[size=19][color=%s]%s[/color][/size]"
-                         % (_hex(_HINT), seq),
-                    markup=True, font_style="Body2",
-                    theme_text_color="Custom", text_color=_HINT,
-                    size_hint=(None, None), width=dp(64),
-                    halign="left", valign="top",
-                )
-            title_lb = MDLabel(
-                text=title, font_style="Body2",
-                theme_text_color="Custom", text_color=_GREY,
-                size_hint=(1, None), adaptive_height=True,
-                halign="left", valign="top",
-            )
-            title_lb.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
-            row.add_widget(seq_lb)
-            row.add_widget(title_lb)
-            self.news_card.add_widget(row)
+                head = "[size=21][color=%s]%s[/color][/size]" % (_hex(_HINT), seq)
+            lines.append("%s\u00A0%s" % (head, title))
+        news_lb = MDLabel(
+            text="\n\n".join(lines), markup=True, font_style="Body2",
+            theme_text_color="Custom", text_color=_GREY, adaptive_height=True,
+        )
+        news_lb.bind(on_ref_press=self._open_news_link)
+        self.news_card.add_widget(news_lb)
 
     def _render_hist_field(self, key, rows):
         """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。
