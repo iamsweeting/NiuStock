@@ -20,7 +20,7 @@ from kivy.utils import get_color_from_hex
 
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.button import MDRaisedButton
-from kivymd.uix.card import MDCard
+from kivymd.uix.card import MDCard, MDSeparator
 from kivymd.uix.label import MDLabel
 
 from . import market
@@ -185,7 +185,7 @@ class MacroPage:
         self._render_derived(box, market.derive_macro_assets(aseries, ast.get("extra", {})),
                              _DERIVE_META.get("assets"), extra_note=ast.get("extra", {}))
 
-        box.add_widget(self._title("六、大宗商品（近12个月月均金油比）"))
+        box.add_widget(self._title("六、大宗商品与比特币（近12个月）"))
         self._render_commodity(d.get("commodity", {}), ast)
 
     def _render_group(self, box, months, series, meta, derived):
@@ -383,6 +383,72 @@ class MacroPage:
         ml.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
         card.add_widget(ml)
         self.body.add_widget(card)
+        # ---- 比特币 + 金比特币（本页最后，金油比下面，需求恢复）----
+        self._render_btc(ast)
+
+    def _render_btc(self, ast):
+        """比特币与金比特币（伦敦金÷比特币）：页面最后。MEXC 不可达时显示暂无。"""
+        ast = ast or {}
+        btc_m = ast.get("months", {}).get("btc", [])
+        btc_v = ast.get("series", {}).get("比特币", [])
+        gold_m = ast.get("months", {}).get("gold", [])
+        gold_v = ast.get("series", {}).get("伦敦金", [])
+        if not btc_v or not any(btc_v):
+            self.body.add_widget(self._card_text("比特币：暂无数据（数据源网络不可达）"))
+            return
+        card = MDCard(
+            orientation="vertical", padding=[dp(10), dp(6), dp(10), dp(6)],
+            radius=_CARD_RADIUS, elevation=0, size_hint_y=None, md_bg_color=_MAIN_BG,
+        )
+        card.bind(minimum_height=card.setter("height"))
+        # 比特币最新值
+        line, latest = self._latest_line("比特币", btc_m, btc_v, _FMT_BTC)
+        lb = MDLabel(text=line, markup=True, font_style="Body2", bold=True,
+                     theme_text_color="Custom", text_color=_WHITE, adaptive_height=True)
+        lb.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
+        card.add_widget(lb)
+        card.add_widget(self._meaning_line(
+            "代表数字资产与风险偏好；上涨=资金风险偏好提升，利好科技成长股"))
+        cells = []
+        for i in range(len(btc_m) - 1, -1, -1):
+            v = btc_v[i]
+            if v is None:
+                continue
+            cells.append("%s %s" % (market._month_short(btc_m[i]), "%.0f" % v))
+        if cells:
+            rows = ["   ".join(cells[j:j + 3]) for j in range(0, len(cells), 3)]
+            ml = MDLabel(text="\n".join(rows), font_style="Caption",
+                         theme_text_color="Custom", text_color=_GREY, adaptive_height=True)
+            ml.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
+            card.add_widget(ml)
+        # 金比特币 = 伦敦金 ÷ 比特币（最新 + 近12月）
+        if gold_v and gold_m:
+            gmap = dict(zip(gold_m, gold_v))
+            bmap = dict(zip(btc_m, btc_v))
+            months = sorted(set(gmap) & set(bmap))[-12:][::-1]
+            ratios = []
+            for m in months:
+                g, b = gmap[m], bmap[m]
+                if g and b:
+                    ratios.append((m, g / b))
+            if ratios:
+                card.add_widget(MDSeparator())
+                cur = ratios[0][1]
+                card.add_widget(MDLabel(
+                    text="[color=%s]金比特币[/color]  %.4f（%s）"
+                         % (_hex(_WHITE), cur, market._month_short(ratios[0][0])),
+                    markup=True, font_style="Body2", bold=True,
+                    theme_text_color="Custom", text_color=_WHITE, adaptive_height=True,
+                ))
+                card.add_widget(self._meaning_line(
+                    "=伦敦金÷比特币，代表避险/风险偏好比值；走高=避险占优，对股市偏空"))
+                rcells = ["%s %.4f" % (market._month_short(m), r) for m, r in ratios]
+                rrows = ["   ".join(rcells[j:j + 3]) for j in range(0, len(rcells), 3)]
+                rl = MDLabel(text="\n".join(rrows), font_style="Caption",
+                             theme_text_color="Custom", text_color=_GREY, adaptive_height=True)
+                rl.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
+                card.add_widget(rl)
+        self.body.add_widget(card)
 
     def _render_us(self, d):
         """一、中美关键指标发布：中美分开；每指标显示本周期/上周期值；
@@ -418,7 +484,7 @@ class MacroPage:
         if us:
             card2 = MDCard(
                 orientation="vertical", padding=[dp(10), dp(8), dp(10), dp(8)],
-                spacing=dp(6),
+                spacing=dp(12),
                 radius=_CARD_RADIUS, elevation=0, size_hint_y=None, md_bg_color=_MAIN_BG,
             )
             card2.bind(minimum_height=card2.setter("height"))
@@ -435,7 +501,7 @@ class MacroPage:
                     (it.get("name", ""), _WHITE, 0.40),
                     (vtxt, _TITLE if val is None else _WHITE, 0.20),
                     (ptxt, _HINT, 0.20),
-                ], height=30, font_style="Body2"))
+                ], height=36, font_style="Body2"))
             card2.add_widget(self._meaning_line(
                 "未公布（待发布）为即将到来的发布提醒；已公布显示最新值。"))
             self.body.add_widget(card2)
