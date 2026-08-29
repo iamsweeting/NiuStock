@@ -403,6 +403,30 @@ def test_split_news_title():
     assert len(b) == 100
 
 
+def test_parse_em_fastnews():
+    # 东财快讯：title + summary（【标题】正文）
+    payload = json.dumps({"data": {"fastNewsList": [
+        {"showTime": "2026-08-29 17:34:21", "title": "杰瑞股份：燃气轮机订单超200亿",
+         "summary": "【杰瑞股份：燃气轮机订单超200亿】预计2026年订单额超200亿人民币",
+         "code": "1"},
+        {"showTime": "2026-08-29 17:30:55", "title": "普通生活新闻",
+         "summary": "【普通生活新闻】某地天气晴好", "code": "2"},
+        {"showTime": "2026-08-29 17:22:04", "title": "半导体板块资金流入",
+         "summary": "【半导体板块资金流入】存储芯片需求回暖", "code": "3"},
+    ]}})
+    news = market.parse_em_fastnews(payload, n=10)
+    texts = [(t, b) for _x, t, b, _u in news]
+    assert any("杰瑞股份" in t for t, _ in texts)          # 重大（订单/亿）
+    assert any("半导体" in t for t, _ in texts)             # 半导体
+    assert not any("普通生活" in t for t, _ in texts)       # 无关剔除
+    # 正文去掉【标题】前缀
+    for t, b in texts:
+        if "杰瑞股份" in t:
+            assert "预计2026年" in b
+    # 正文 ≤100 字
+    assert all(len(b) <= 100 for _t, b in texts)
+
+
 def test_macro_cache_roundtrip(tmp_path):
     # 缓存读写 + refresh_macro_cached 当天命中（不联网）
     orig_path = market._macro_cache_path

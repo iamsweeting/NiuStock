@@ -14,7 +14,7 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.utils import get_color_from_hex
 
 from kivymd.uix.boxlayout import MDBoxLayout
-from kivymd.uix.button import MDIconButton, MDRaisedButton
+from kivymd.uix.button import MDFlatButton, MDIconButton, MDRaisedButton
 from kivymd.uix.label import MDLabel
 from kivymd.uix.textfield import MDTextField
 try:
@@ -62,21 +62,24 @@ class BatchPage:
         fill_row = MDBoxLayout(
             orientation="horizontal", size_hint_y=None, height=dp(42), spacing=dp(8),
         )
-        btn_market = MDRaisedButton(
+        btn_market = MDFlatButton(
             text="大盘", size_hint_x=1, size_hint_y=None, height=dp(36),
             pos_hint={"center_y": 0.5},
         )
-        btn_market.elevation = 0
         btn_market.bind(on_release=lambda x: self._fill_market_preset())
-        btn_recent = MDRaisedButton(
+        btn_recent = MDFlatButton(
             text="近期查询", size_hint_x=1, size_hint_y=None, height=dp(36),
             pos_hint={"center_y": 0.5},
         )
-        btn_recent.elevation = 0
         btn_recent.bind(on_release=lambda x: self._fill_recent_queries())
+        self._btn_market = btn_market
+        self._btn_recent = btn_recent
         fill_row.add_widget(btn_market)
         fill_row.add_widget(btn_recent)
         box.add_widget(fill_row)
+        # 默认"近期查询"为激活操作（蓝色），与下方按日/按周一致（需求）
+        # 主题覆盖 md_bg_color，延迟一帧再设置
+        Clock.schedule_once(lambda dt: self._set_fill_active("recent"), 0.05)
         box.add_widget(MDLabel(
             text="大盘：A股常见指数（含中证A500）+港股+纳斯达克+纽约金+沪金主连\n"
                  "近期查询：来自本地查询名单（watchlist.json，重启保留；趋势/枢轴点/批量查询自动记录，大盘预设除外）",
@@ -110,7 +113,8 @@ class BatchPage:
         row1.add_widget(self.algo_btn)
         row1.add_widget(MDLabel(size_hint_x=1))
         box.add_widget(row1)
-        self._set_mode(self.mode)
+        # KivyMD 主题在 on_kv_post 时覆盖 md_bg_color，需延迟一帧再设置高亮
+        Clock.schedule_once(lambda dt: self._set_mode(self.mode), 0.05)
         self._cycle_algo()
 
         row2 = MDBoxLayout(
@@ -206,17 +210,19 @@ class BatchPage:
         self.date_label.text = value.strftime("%Y-%m-%d")
 
     def _fill_market_preset(self):
-        """「大盘」：填入常见指数/商品代码并自动计算。"""
+        """「大盘」：填入常见指数/商品代码并自动计算（激活大盘按钮）。"""
+        self._set_fill_active("market")
         codes = "\n".join(config.MARKET_PRESET_CODES)
         self.code_input.text = codes
         self.on_calc()
 
     def _fill_recent_queries(self):
-        """「近期查询」：填入除大盘预设外的最近查询代码并自动计算。
+        """「近期查询」：填入除大盘预设外的最近查询代码并自动计算（激活近期查询按钮）。
 
         数据来源：本地查询名单（user_data_dir/watchlist.json，重启保留）。
         排序：前三名按门槛排名，其余按查询次数降序（count 累计）。
         """
+        self._set_fill_active("recent")
         items = self.app.watchlist.items()
         recent = [it["code"] for it in items
                   if it["code"] not in _PRESET_NORM]
@@ -225,6 +231,18 @@ class BatchPage:
             return
         self.code_input.text = "\n".join(recent)
         self.on_calc()
+
+    def _set_fill_active(self, which):
+        """「大盘/近期查询」互斥高亮：当前操作蓝色文字、另一灰色文字
+        （MDFlatButton 用 text_color，规避 MDRaisedButton 宽按钮背景在
+        Adreno 上不绘制的问题；与按日/按周一致）。"""
+        active = get_color_from_hex("#8ab4f8")
+        idle = get_color_from_hex("#8a9199")
+        try:
+            self._btn_market.text_color = active if which == "market" else idle
+            self._btn_recent.text_color = active if which == "recent" else idle
+        except Exception:  # noqa: BLE001
+            pass
 
     def on_calc(self):
         if self._busy:
