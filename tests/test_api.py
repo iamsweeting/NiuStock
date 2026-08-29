@@ -22,7 +22,14 @@ def test_normalize_code():
     assert api.normalize_code("SH.000852") == "sh000852"
     assert api.normalize_code("HSTECH") == "hstech"
     assert api.normalize_code("hk00700") == "hk00700"
-    assert api.normalize_code("usAAPL") == "usaapl"
+    # 外盘/贵金属/期货前缀保留原始大小写（数据源大小写敏感）
+    assert api.normalize_code("usAAPL") == "usAAPL"
+    assert api.normalize_code("usIXIC") == "usIXIC"
+    assert api.normalize_code("USIXIC") == "usIXIC"   # 批量解析转大写后仍还原
+    assert api.normalize_code("hf_GC") == "hf_GC"
+    assert api.normalize_code("HF_GC") == "hf_GC"
+    assert api.normalize_code("nf_AU0") == "nf_AU0"
+    assert api.normalize_code("NF_AU0") == "nf_AU0"
 
 
 def test_normalize_code_empty_raises():

@@ -114,10 +114,10 @@ MARKET_PRESET = [
     ("sh000688", "科创50"),
     ("sz399006", "创业板指"),
     ("hkHSI", "恒生指数"),
-    ("hkHSTECH", "恒生科技"),
+    ("hkHSTECH", "恒生科技指数"),
     ("sh513330", "恒生互联网ETF"),
     ("usIXIC", "纳斯达克"),
-    ("hf_GC", "纽约金"),
+    ("hf_GC", "纽约黄金"),
     ("nf_AU0", "沪金主连"),
 ]
 MARKET_PRESET_CODES = [c for c, _n in MARKET_PRESET]

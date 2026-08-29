@@ -39,8 +39,8 @@ _SPECIAL_CODE_MAP = {
     "BRENT": ("BRENT", "hf"),        # 布伦特原油
 }
 
-_PREFIXES = ("SH.", "SZ.", "HK.", "US.", "HF.", "BJ.", "FX.",
-             "SH", "SZ", "HK", "US", "HF", "BJ", "FX")
+_PREFIXES = ("SH.", "SZ.", "HK.", "US.", "HF.", "NF.", "BJ.", "FX.",
+             "SH", "SZ", "HK", "US", "HF", "NF", "BJ", "FX")
 
 
 def parse_stock_code(stock_code):

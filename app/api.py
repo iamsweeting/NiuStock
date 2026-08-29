@@ -47,11 +47,18 @@ def normalize_code(raw):
     """把用户输入规范成小写代码；6 位纯数字自动补市场前缀。
 
     例：'600519' -> 'sh600519'，'000001' -> 'sz000001'，'HSTECH' -> 'hstech'，
-        'SH.000852' -> 'sh000852'，'hk00700' -> 'hk00700'，'usAAPL' -> 'usaapl'
+        'SH.000852' -> 'sh000852'，'hk00700' -> 'hk00700'，'usIXIC' -> 'usIXIC'
+    外盘/贵金属/期货前缀（us/hf/nf）保留原始大小写：
+    数据源大小写敏感（腾讯美股 usIXIC、新浪 hf_GC / nf_AU0），
+    全小写会查无数据（实测 usixic / hf_gc 均无匹配）。
     """
-    code = (raw or "").strip().lower().replace(" ", "").replace(".", "")
-    if not code:
+    s = (raw or "").strip().replace(" ", "").replace(".", "")
+    if not s:
         raise ValueError("请输入股票代码")
+    m = re.fullmatch(r"(?i)(us|hf|nf).+", s)
+    if m:
+        return m.group(1).lower() + s[len(m.group(1)):]
+    code = s.lower()
     if re.fullmatch(r"\d{6}", code):
         if code[0] == "6":
             return "sh" + code
@@ -466,7 +473,7 @@ def aggregate_pivot(rows, target, weekly=False, skip_today=False):
 def _fetch_realtime_pivot(code, target_date):
     """实时报价兜底（仅当日，same_day）：部分品种腾讯K线无历史覆盖。
 
-      - us*（纳斯达克等美股指数）：腾讯 qt.gtimg.cn，字段 3/4/5=现/昨/开，33/34/35=涨跌%/高/低
+      - us*（纳斯达克等美股指数）：腾讯 qt.gtimg.cn，字段 3/4/5=现/昨/开，30/31/32/33=涨跌额/涨跌%/高/低
       - nf_*（沪金主连等期货）/ hf_*（纽约金等贵金属）：新浪 hq，逗号格式
     返回 {high, low, close, open, name, source} 或 None（不支持）。
     """
@@ -481,10 +488,10 @@ def _fetch_realtime_pivot(code, target_date):
             if not m:
                 return None
             f = m.group(1).split("~")
-            if len(f) < 36:
+            if len(f) < 34:
                 return None
             return {
-                "name": f[1], "high": _f(f[34]), "low": _f(f[35]),
+                "name": f[1], "high": _f(f[32]), "low": _f(f[33]),
                 "close": _f(f[3]), "open": _f(f[5]),
                 "source": config.SOURCE_TENCENT,
             }
