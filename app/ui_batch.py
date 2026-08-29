@@ -50,11 +50,12 @@ class BatchPage:
     # 构建
     # ------------------------------------------------------------------
     def build(self, box):
-        # 需求：允许默认输入（预填三只默认ETF，也可修改）
+        # 需求：允许默认输入（预填三只默认ETF，也可修改）；
+        # 代码以空格间隔、每行三个，紧凑排版不占地方
         self.code_input = MDTextField(
-            hint_text="每行一个代码，如：\n159516\n513310\n159845",
-            multiline=True, size_hint_y=None, height=dp(110),
-            text="159516\n513310\n159845",
+            hint_text="代码用空格间隔，每行三个，如：\n159516 513310 159845",
+            multiline=True, size_hint_y=None, height=dp(88),
+            text="159516 513310 159845",
         )
         box.add_widget(self.code_input)
 
@@ -167,7 +168,7 @@ class BatchPage:
 
         box.add_widget(MDLabel(
             text="代码支持：600519 / sz159516 / HSTECH 等\n"
-                 "（每行一个，可用逗号/空格分隔）\n"
+                 "（空格间隔，每行三个）\n"
                  "统一数据源：腾讯财经（默认）→ 新浪财经（备用）\n"
                  "点击单元格复制，底部可一键复制全部结果\n"
                  "指标仅供技术分析参考，不构成投资建议",
@@ -209,11 +210,16 @@ class BatchPage:
         # 需求：只显示日期数字，去掉汉语
         self.date_label.text = value.strftime("%Y-%m-%d")
 
+    @staticmethod
+    def _fmt_codes(codes, per_line=3):
+        """代码列表 → 每行 per_line 个、空格间隔的紧凑文本（需求）。"""
+        return "\n".join(" ".join(codes[i:i + per_line])
+                         for i in range(0, len(codes), per_line))
+
     def _fill_market_preset(self):
         """「大盘」：填入常见指数/商品代码并自动计算（激活大盘按钮）。"""
         self._set_fill_active("market")
-        codes = "\n".join(config.MARKET_PRESET_CODES)
-        self.code_input.text = codes
+        self.code_input.text = self._fmt_codes(list(config.MARKET_PRESET_CODES))
         self.on_calc()
 
     def _fill_recent_queries(self):
@@ -229,7 +235,7 @@ class BatchPage:
         if not recent:
             self.app._toast("暂无近期查询记录")
             return
-        self.code_input.text = "\n".join(recent)
+        self.code_input.text = self._fmt_codes(recent)
         self.on_calc()
 
     def _set_fill_active(self, which):

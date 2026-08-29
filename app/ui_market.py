@@ -260,12 +260,12 @@ class MarketPage:
                                  if errs else "")
 
     def _render_turnover(self, live):
-        # A股成交额（沪深+北证）/ 本日预测额 / 较上日变化 —— 三行对齐（需求）
+        # 两市成交额（沪深合计）/ 本日预测额 / 较上日变化 —— 三行对齐（需求）
         t = live.get("turnover_yi")
         p = live.get("turnover_pred_yi")
         vp = live.get("turnover_vs_prev")
         rows = []
-        rows.append(("A股成交额", "%.0f 亿" % t if t else "—", _WHITE))
+        rows.append(("两市成交额", "%.0f 亿" % t if t else "—", _WHITE))
         if p:
             rows.append(("本日预测额", "%.0f 亿（开市%d分钟）" % (
                 p, int(market.elapsed_trade_minutes())), _GREEN))
@@ -481,7 +481,7 @@ def _hex(col):
 
 
 _HIST_TITLES = {
-    "turnover": "A股成交额（亿元，含北证）",
+    "turnover": "两市成交额（亿元）",
     "ccpr": "美元兑人民币中间价",
     "wti": "WTI原油（美元/桶）",
     "xau": "伦敦金（美元/盎司）",

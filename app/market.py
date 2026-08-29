@@ -491,12 +491,10 @@ def _pacing(prev, gap=0.25):
 # --------------------------------------------------------------------------
 
 def _sec_live_sina():
-    """实时①：A股成交额（沪深+北证，同花顺口径）+ 本日预测额 + 较上日变化。
+    """实时①：两市成交额（沪深合计）+ 本日预测额 + 较上日变化。
 
-    - 标注交易日日期（腾讯 day/query 最后交易日）
-    - 盘中：实时成交额、预测=分时占比模型、较上日=同时段对比
+    - 盘中：实时成交额（新浪沪深两市）、预测=分时占比模型、较上日=同时段对比
     - 非交易日/盘前：使用最后交易日全天数据（预测=当日实际、较上日=与前日全天差）
-    - 北证成交额：腾讯实时 bj899050；较上日变化用沪深对比（北证历史另算）
     """
     sess = _session()
     data = {"quotes": [], "errors": []}
@@ -517,20 +515,6 @@ def _sec_live_sina():
                 data["errors"].append("%s 无行情" % label)
         sh = amounts.get("sh000001")
         sz = amounts.get("sz399001")
-        # 北证成交额（腾讯实时 bj899050 f35 第三段=成交额元）
-        bj = None
-        try:
-            txt = _get_text(sess, "https://qt.gtimg.cn/q=bj899050",
-                            headers={"Referer": "https://gu.qq.com/"}, tries=2, pause=0.6)
-            m = re.search(r'v_bj899050="([^"]*)"', txt)
-            if m:
-                f = m.group(1).split("~")
-                if len(f) > 35:
-                    parts = f[35].split("/")
-                    if len(parts) >= 3:
-                        bj = _f(parts[2])
-        except Exception:  # noqa: BLE001
-            pass
         if not (sh and sz):
             data["errors"].append("成交额数据缺失")
         else:
@@ -543,14 +527,14 @@ def _sec_live_sina():
                     data["trade_date"] = "%s-%s-%s" % (last_date[:4], last_date[4:6], last_date[6:8])
                     el = elapsed_trade_minutes()
                     if el <= 0:
-                        # 非交易日/盘前：用最后交易日全天（沪深+北证）
-                        total = last_full + (bj or 0.0)
+                        # 非交易日/盘前：用最后交易日沪深两市全天
+                        total = last_full
                         data["turnover_yi"] = round(total / 1e8, 2)
                         data["turnover_pred_yi"] = round(total / 1e8, 2)
                         data["turnover_vs_prev"] = round(
                             (last_full - prev_full) / 1e8, 2)
                     else:
-                        total = sh + sz + (bj or 0.0)
+                        total = sh + sz
                         data["turnover_yi"] = round(total / 1e8, 2)
                         pred = _predict_turnover_model_or_linear(total)
                         data["turnover_pred_yi"] = round(pred / 1e8, 2) if pred else None
@@ -687,7 +671,7 @@ def _tx_amounts_full(symbol, n=5):
 def _tx_turnover_days(n=5):
     """沪深两市合计全天成交额：[(date8, 两市成交额元)] 最近 n 个交易日（升序）。
 
-    非交易日/盘前口径：A股成交额 = 上证 day/query + 深证 day/query + 北证实时。
+    非交易日/盘前口径：两市成交额 = 上证 day/query + 深证 day/query。
     """
     days = {}
     for sym in ("sh000001", "sz399001"):
@@ -804,7 +788,7 @@ def predict_turnover_model(amount_yuan, profile, avg_daily, now=None,
 
 
 def _sec_hist_turnover():
-    """历史①：A股成交额 5 日（沪深腾讯 day/query + 北证东财 push2his，含北证）。"""
+    """历史①：两市成交额 5 日（沪深腾讯 day/query 主 → 东方财富兜底）。"""
     sess = _session()
     data = {"errors": []}
     try:
@@ -814,29 +798,14 @@ def _sec_hist_turnover():
             for d, amt in _tx_day_query_amount(sym, 5):
                 days[d] = days.get(d, 0.0) + amt
             last = _pacing(last)
-        # 北证50 成交额（东财 push2his 0.899050）
-        try:
-            text = _get_text(sess, EM_KLINE, params={
-                "secid": "0.899050", "fields1": "f1,f2,f3",
-                "fields2": "f51,f52,f53,f54,f55,f56,f57",
-                "klt": 101, "fqt": 1,
-                "beg": (_cn_now() - timedelta(days=12)).strftime("%Y%m%d"),
-                "end": (_cn_now() + timedelta(days=1)).strftime("%Y%m%d")},
-                tries=3, pause=1.0)
-            for day, _v, amt in parse_em_kline(text):
-                bjday = day.replace("-", "")
-                if bjday in days:
-                    days[bjday] += amt
-        except Exception:  # noqa: BLE001 北证源失败不阻塞
-            pass
         if days:
             data["turnover"] = [
                 (d, round(days[d] / 1e8, 2)) for d in sorted(days)[-5:]]
-            data["sources"] = {"腾讯": True, "东方财富": True}
+            data["sources"] = {"腾讯": True}
         else:
             raise RuntimeError("腾讯无数据")
     except Exception as e:  # noqa: BLE001
-        data["errors"].append("A股成交额历史(腾讯)：%s" % e)
+        data["errors"].append("两市成交额历史(腾讯)：%s" % e)
         # 兜底：东方财富 push2his（沪深日K 成交额合计）
         try:
             em_days = {}
@@ -858,7 +827,7 @@ def _sec_hist_turnover():
                 data["sources"] = {"东方财富": True}
                 data["errors"] = []   # 兜底成功则清除错误
         except Exception as e2:  # noqa: BLE001
-            data["errors"].append("A股成交额历史(东财)：%s" % e2)
+            data["errors"].append("两市成交额历史(东财)：%s" % e2)
     return data
 
 
