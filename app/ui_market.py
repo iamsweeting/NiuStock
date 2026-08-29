@@ -338,7 +338,7 @@ class MarketPage:
             item.bind(minimum_height=item.setter("height"))
             if url and url.startswith("http"):
                 title_lb = MDLabel(
-                    text="[ref=%s][color=%s]【%s】[/color][/ref]"
+                    text="[ref=%s][color=%s]%s[/color][/ref]"
                          % (url, _hex(_HIST_TITLE_COLOR), title),
                     markup=True, font_style="Body2",
                     theme_text_color="Custom", text_color=_HIST_TITLE_COLOR,
@@ -348,7 +348,7 @@ class MarketPage:
                 title_lb.bind(on_ref_press=self._open_news_link)
             else:
                 title_lb = MDLabel(
-                    text="[color=%s]【%s】[/color]"
+                    text="[color=%s]%s[/color]"
                          % (_hex(_HIST_TITLE_COLOR), title),
                     markup=True, font_style="Body2",
                     theme_text_color="Custom", text_color=_HIST_TITLE_COLOR,
