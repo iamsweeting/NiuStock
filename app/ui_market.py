@@ -312,10 +312,10 @@ class MarketPage:
         self.median_label.text = "  ·  ".join(med_parts)
 
     def _render_news(self, news):
-        """财经消息：去掉序号；每条 = 标题行【标题】(蓝色链接) + 正文行(另起一行)。
+        """财经消息（东财快讯/A股为主，10 条）：标题 + 正文另起一行。
 
-        正文 ≤100 字、纯文本 label（\u00A0 可靠生效 → 不在字母/数字后断行，
-        仅因宽度自然换行）；无标题的新闻忽略。news: [(时间, rich_text, url)]。
+        news: [(时间, 标题, 正文≤100字, url)]。标题有 url 才做蓝色链接；
+        无 url 标题用普通色（避免大段文字变蓝）；正文灰色、空格不换行。
         """
         if not news:
             self.news_card.clear_widgets()
@@ -328,10 +328,9 @@ class MarketPage:
         self.news_card.clear_widgets()
         self.news_card.spacing = dp(8)
         shown = 0
-        for _ct, text, url in news[:10]:
-            title, body = market.split_news_title(text)
+        for _t, title, body, url in news[:10]:
             if not title:
-                continue   # 无标题 → 忽略该新闻
+                continue
             item = MDBoxLayout(
                 orientation="vertical", size_hint_y=None, spacing=dp(1),
             )
@@ -348,16 +347,14 @@ class MarketPage:
                 title_lb.bind(on_ref_press=self._open_news_link)
             else:
                 title_lb = MDLabel(
-                    text="[color=%s]%s[/color]"
-                         % (_hex(_HIST_TITLE_COLOR), title),
-                    markup=True, font_style="Body2",
-                    theme_text_color="Custom", text_color=_HIST_TITLE_COLOR,
+                    text=market._no_break_latin(title), font_style="Body2",
+                    theme_text_color="Custom", text_color=_WHITE,
                     size_hint=(1, None), adaptive_height=True,
                     halign="left", valign="top",
                 )
+                title_lb.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
             item.add_widget(title_lb)
             if body:
-                # 正文另起一行，纯文本 → 字母/数字后不换行（仅宽度自然换行）
                 body_lb = MDLabel(
                     text=market._no_break_latin(body), font_style="Body2",
                     theme_text_color="Custom", text_color=_GREY,
