@@ -125,13 +125,13 @@ def test_derive_macro_pmi():
     assert abs(d["经济势能"] - (-0.1)) < 1e-9          # 48.5 - 48.6
     assert abs(d["供需差"] - 1.4) < 1e-9               # 49.9 - 48.5
     assert abs(d["备料差"] - 1.1) < 1e-9               # 49.4 - 48.3
-    assert abs(d["TEC"] - (-2.9)) < 1e-9               # (48.5-51.1) - (48.6-48.3)
+    assert "TEC" not in d                              # 已删除（需求）
 
 
 def test_derive_macro_pmi_missing():
     d = market.derive_macro_pmi({"PMI": [49.0]})
     assert d["经济势能"] is None
-    assert d["TEC"] is None
+    assert "TEC" not in d
 
 
 def test_derive_macro_inflation():

@@ -1830,7 +1830,7 @@ def refresh_macro_cached(on_done=None, force=False):
 # --------------------------------------------------------------------------
 
 def derive_macro_pmi(series):
-    """PMI 派生：经济势能/供需差/备料差/TEC（用最新两期，缺值 None）。
+    """PMI 派生：经济势能/供需差/备料差（用最新两期，缺值 None）。
 
     series: {"PMI","生产","新订单","产成品库存","采购量","原材料库存": [值...]}
     返回 {名称: (最新值, 公式, 说明)}。
@@ -1838,8 +1838,8 @@ def derive_macro_pmi(series):
     def last2(k):
         v = series.get(k) or []
         return (v[-1] if v else None, v[-2] if len(v) > 1 else None)
-    xd, xd_p = last2("新订单")
-    ck, ck_p = last2("产成品库存")
+    xd, _ = last2("新订单")
+    ck, _ = last2("产成品库存")
     sc, _ = last2("生产")
     gl, _ = last2("采购量")
     yl, _ = last2("原材料库存")
@@ -1847,10 +1847,6 @@ def derive_macro_pmi(series):
     out["经济势能"] = (xd - ck) if (xd is not None and ck is not None) else None
     out["供需差"] = (sc - xd) if (sc is not None and xd is not None) else None
     out["备料差"] = (gl - yl) if (gl is not None and yl is not None) else None
-    if xd is not None and xd_p is not None and ck is not None and ck_p is not None:
-        out["TEC"] = (xd - xd_p) - (ck - ck_p)
-    else:
-        out["TEC"] = None
     return out
 
 

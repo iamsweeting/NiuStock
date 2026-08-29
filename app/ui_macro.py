@@ -725,9 +725,6 @@ _DERIVE_META = {
         "备料差": {"formula": "采购量−原材料库存",
                    "meaning": "代表主动补库意愿，为负=主动备料；预示生产扩张，利好上游。",
                    "fmt": _FMT_PCT1},
-        "TEC": {"formula": "Δ新订单−Δ产成品库存",
-                "meaning": "代表近两期经济动能变化；转正=动能增强，对股市偏多。",
-                "fmt": _FMT_PCT1},
     },
     "inflation": {
         "通胀预期指数": {"formula": "CPI同比−PPI同比",

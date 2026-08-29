@@ -264,12 +264,10 @@ class MarketPage:
         t = live.get("turnover_yi")
         p = live.get("turnover_pred_yi")
         vp = live.get("turnover_vs_prev")
-        tdate = live.get("trade_date")
         rows = []
-        dlabel = ("A股成交额" if not tdate else "A股成交额 %s" % tdate[-5:])
-        rows.append((dlabel, "%.0f 亿" % t if t else "—", _WHITE))
+        rows.append(("A股成交额", "%.0f 亿" % t if t else "—", _WHITE))
         if p:
-            rows.append(("本日预测额", "%.0f 亿（开市%d分钟，模型估算）" % (
+            rows.append(("本日预测额", "%.0f 亿（开市%d分钟）" % (
                 p, int(market.elapsed_trade_minutes())), _GREEN))
         else:
             rows.append(("本日预测额", "—", _GREEN))
