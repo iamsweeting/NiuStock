@@ -131,5 +131,5 @@ rm -rf /home/user/.buildozer/android/platform/build-* \
        /home/user/.buildozer/android/platform/hostpython* 2>/dev/null || true
 
 # ---------- 6. 构建 ----------
-echo ">> 开始构建 ..."
-echo y | /tmp/bz-venv/bin/buildozer -v android debug
+echo ">> 开始构建（release，签名 keystore/release.keystore，alias=nstock）..."
+echo y | /tmp/bz-venv/bin/buildozer -v android release
