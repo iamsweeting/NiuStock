@@ -132,4 +132,11 @@ rm -rf /home/user/.buildozer/android/platform/build-* \
 
 # ---------- 6. 构建 ----------
 echo ">> 开始构建（release，签名 keystore/release.keystore，alias=nstock）..."
+# release 签名：p4a 通过环境变量接收密钥（实测 buildozer 对 spec 键透传不可靠，
+# 报 "P4A_RELEASE_KEYSTORE missing" 产出 unsigned APK），这里显式注入。
+export P4A_RELEASE_KEYSTORE=/home/user/hostcwd/keystore/release.keystore
+export P4A_RELEASE_KEYSTORE_PASSWD=nstock2026
+export P4A_RELEASE_KEYSTORE_ALIAS=nstock
+export P4A_RELEASE_KEYSTORE_ALIAS_PASSWD=nstock2026
+echo "== release 签名注入: $P4A_RELEASE_KEYSTORE ($(ls -la "$P4A_RELEASE_KEYSTORE" 2>/dev/null | awk '{print $5}') bytes) =="
 echo y | /tmp/bz-venv/bin/buildozer -v android release
