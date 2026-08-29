@@ -63,10 +63,12 @@ class _Cell(Label):
     def __init__(self, text="", color=(1, 1, 1, 1), bg=_BG_NONE,
                  bold=False, size_hint_x=1, on_copy=None, wrap=False, **kw):
         # 自适应字号：优先按单元格宽度估算，未知宽度时按文本长度分级
-        # （含换行文本按最长行计，避免 \n 计入长度导致字号过小）
-        n = len(text)
-        if "\n" in text:
-            n = max(len(ln) for ln in text.split("\n"))
+        # （含换行文本按最长行计；宽度按汉字=1、半角=0.5 折算，
+        #  避免 ETF 等英文让字号偏小）
+        n = 0
+        for ln in (text.split("\n") if "\n" in text else [text]):
+            w = sum(1.0 if ord(c) > 0x2E80 else 0.5 for c in ln)
+            n = max(n, w)
         w_dp = kw.get("width")
         if w_dp:
             w_dp = w_dp / dp(1)

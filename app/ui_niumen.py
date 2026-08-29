@@ -147,28 +147,20 @@ class NiumenPage:
     def _refresh_chips(self):
         """按查询名单前 3 个重建快捷按钮；长按从名单移除。
 
-        名称 ≤4 字用大号字；更长则缩字号并允许两行显示；
-        过长名称（如"国泰中证半导体材料设备主题ETF"）按能放几个字放几个字截断（需求）。
+        需求：名称强制单行（chars_per_line=8 字符宽，超长截断），
+        避免 ETF 名称两行与单行名称（如澜起科技）混排高度不齐。
         """
         from .batch import name_display
         self.chips_row.clear_widgets()
         for item in self.app.watchlist.top(3):
             name = item["name"]
-            text, lines = name_display(name, chars_per_line=5, max_lines=2)
-            if lines > 1:
-                height, font = dp(46), 11
-            else:
-                height, font = dp(36), 14
+            text, _lines = name_display(name, chars_per_line=8, max_lines=1)
             b = MDRaisedButton(
-                text=text, size_hint_x=1, size_hint_y=None, height=height,
+                text=text, size_hint_x=1, size_hint_y=None, height=dp(36),
                 md_bg_color=CHIP_BG, text_color=(1, 1, 1, 1),
-                font_size=dp(font), halign="center", valign="center",
+                font_size=dp(14), halign="center", valign="center",
             )
             b.elevation = 0
-            if lines > 1:
-                # 长名称允许换行（两行）
-                b.bind(width=lambda w, *a: setattr(
-                    w, "text_size", (w.width - dp(8), None)))
             b._code = item["code"]
             b.bind(on_release=lambda x: self._chip_release(x))
             self._bind_long_press(b, lambda w: self._chip_remove(w))

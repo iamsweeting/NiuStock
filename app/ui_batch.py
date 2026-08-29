@@ -364,8 +364,10 @@ class BatchPage:
         self.results_box.add_widget(hrow)
 
         for r in rows:
-            # 名称显示规则：1行放下直接完整；2行放下写全名换行；2行仍放不下才"…"
-            name_text, name_lines = batch.name_display(r["name"], chars_per_line=5)
+            # 名称显示规则（需求，字符宽度）：汉字=1、半角字母数字=0.5（ETF=1.5），
+            # 每行 ≤8 字符、两行 ≤16 字符，超出截断；词边界断行 ETF 不拆开。
+            # 名称列宽 56dp 只容约 4 汉字，之前按 5 单位断行被 Kivy 二次折行成 3 行。
+            name_text, name_lines = batch.name_display(r["name"], chars_per_line=8, max_lines=2)
             row_h = dp(44) if name_lines >= 2 else dp(28)
             row = BoxLayout(orientation="horizontal", size_hint_y=None, height=row_h)
             name_cell = _Cell(name_text,

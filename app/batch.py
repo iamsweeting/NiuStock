@@ -29,7 +29,7 @@ def truncate_name(name, max_chars=6):
 def _name_units(name):
     """把名称拆成显示单位：单个汉字=1 单位，连续 Latin/数字词（如 ETF）=1 单位。
 
-    需求：名称列 5 字/行硬截断会把「ETF」拆成 E/TF 两行（用户实测
+    需求：名称列硬截断会把「ETF」拆成 E/TF 两行（用户实测
     「恒生互联网ETF华夏」「半导体设备ETF」），改为按词边界断行。
     """
     units = []
@@ -44,25 +44,69 @@ def _name_units(name):
     return units
 
 
-def name_display(name, chars_per_line=5, max_lines=2):
-    """返回 (显示文本, 所需行数)。规则（需求）：
-      - ≤ chars_per_line 单位：1 行完整显示
-      - ≤ chars_per_line * max_lines 单位：写全名换行（2 行，词边界断行，ETF 不拆开）
-      - 超过：能放几个放几个，直接截断（不用省略号，2 行仍可读）
-    断行单位：汉字=1，连续 Latin/数字词（ETF、A500 等）=1，返回文本含 \n。
+def _display_width(text):
+    """显示宽度（字符）：汉字/全角=1，半角字母数字=0.5（ETF=1.5 字符）。"""
+    return sum(1.0 if ord(c) > 0x2E80 else 0.5 for c in text)
+
+
+def _word_blocks(units):
+    """把单位序列合并成词块：连续汉字=1 块，Latin 词=1 块。
+
+    断行优先在块边界（词完整），块内才按宽度切（避免「精选」被拆成「精/选」）。
+    """
+    blocks = []
+    cur = []
+    for u in units:
+        is_latin = bool(_LATIN_WORD.fullmatch(u))
+        if cur and (is_latin != bool(_LATIN_WORD.fullmatch(cur[-1]))):
+            blocks.append("".join(cur))
+            cur = []
+        cur.append(u)
+    if cur:
+        blocks.append("".join(cur))
+    return blocks
+
+
+def name_display(name, chars_per_line=8, max_lines=2):
+    """返回 (显示文本, 所需行数)。规则（需求，字符宽度）：
+      - 汉字=1 字符，半角字母/数字=0.5 字符（ETF 三字母=1.5 字符）
+      - 单行 ≤ chars_per_line 字符；两行合计 ≤ chars_per_line * max_lines
+      - 超出截断不显示；断行优先在词边界（汉字串/Latin 词不拆开）
+    批量页：chars_per_line=8（每行≤8 字符、两行≤16 字符）；趋势页：max_lines=1。
     """
     name = str(name)
     units = _name_units(name)
-    n = len(units)
-    if n <= chars_per_line:
+    if _display_width(name) <= chars_per_line:
         return name, 1
-    if n <= chars_per_line * max_lines:
-        lines = ["".join(units[i:i + chars_per_line])
-                 for i in range(0, n, chars_per_line)]
-        return "\n".join(lines), len(lines)
-    keep = units[:chars_per_line * max_lines]
-    lines = ["".join(keep[i:i + chars_per_line])
-             for i in range(0, len(keep), chars_per_line)]
+    lines, cur, cur_w = [], [], 0.0
+    for block in _word_blocks(units):
+        bw = _display_width(block)
+        # 块本身超一行宽：先在块内按宽度切分（仅长汉字串才会）
+        if bw > chars_per_line:
+            if cur:
+                lines.append("".join(cur))
+                cur, cur_w = [], 0.0
+            seg = ""
+            sw = 0.0
+            for ch in block:
+                cw = 1.0 if ord(ch) > 0x2E80 else 0.5
+                if seg and sw + cw > chars_per_line:
+                    lines.append(seg)
+                    seg, sw = "", 0.0
+                seg += ch
+                sw += cw
+            if seg:
+                cur, cur_w = [seg], sw
+            continue
+        if cur and cur_w + bw > chars_per_line:
+            lines.append("".join(cur))
+            cur, cur_w = [], 0.0
+        cur.append(block)
+        cur_w += bw
+    if cur:
+        lines.append("".join(cur))
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
     return "\n".join(lines), len(lines)
 
 
