@@ -28,6 +28,9 @@ from .ui_pivot import _Cell, MODE_DAILY, MODE_WEEKLY
 
 # 大盘预设码的规范化集合（供"近期查询"过滤与查询记录排除大盘码用）
 _PRESET_NORM = {api.normalize_code(c) for c in config.MARKET_PRESET_CODES}
+# 大盘预设的中文名映射（规范码 → 中文名）：外盘/贵金属/期货等数据源
+# 无中文名（腾讯 hk 指数返回代码本身）时兜底显示（需求：恒生指数/恒生科技指数/纳斯达克/纽约黄金/沪金主连）
+_PRESET_NAMES = {api.normalize_code(c): n for c, n in config.MARKET_PRESET}
 
 _RED = get_color_from_hex("#ef5350")
 _GREEN = get_color_from_hex("#66bb6a")
@@ -292,8 +295,13 @@ class BatchPage:
                     if res.get("ok"):
                         piv = pivot.calculate_single_pivot(
                             res["high"], res["low"], res["close"], res["open"], algorithm)
+                        # 名称汉化兜底：数据源无中文名（腾讯 hk 指数返回代码本身）时
+                        # 用大盘预设中文名（恒生指数/恒生科技指数/纳斯达克/纽约黄金/沪金主连）
+                        name = res["name"] or code
+                        if _PRESET_NAMES.get(code):
+                            name = _PRESET_NAMES[code]
                         row.update({
-                            "name": res["name"],
+                            "name": name,
                             "pp": piv["pp"], "r1": piv["r1"], "s1": piv["s1"],
                             "r2": piv["r2"], "s2": piv["s2"], "r3": piv["r3"],
                             "s3": piv["s3"], "r4": piv["r4"], "s4": piv["s4"],
@@ -301,7 +309,7 @@ class BatchPage:
                         })
                         # 大盘预设码不记入查询名单（避免污染快捷按钮/近期查询）
                         if code not in _PRESET_NORM:
-                            touched.append((code, res["name"]))
+                            touched.append((code, name))
                     else:
                         row["name"] = res.get("msg", "获取失败")[:12]
                 except Exception as e:  # noqa: BLE001
