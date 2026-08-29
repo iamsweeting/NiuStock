@@ -45,8 +45,8 @@ def _name_units(name):
 
 
 def _display_width(text):
-    """显示宽度（字符）：汉字/全角=1，半角字母数字=0.5（ETF=1.5 字符）。"""
-    return sum(1.0 if ord(c) > 0x2E80 else 0.5 for c in text)
+    """显示宽度（字符）：1 汉字=2 字符，1 半角字母/数字=1 字符（ETF=3 字符）。"""
+    return sum(2.0 if ord(c) > 0x2E80 else 1.0 for c in text)
 
 
 def _word_blocks(units):
@@ -89,7 +89,7 @@ def name_display(name, chars_per_line=8, max_lines=2):
             seg = ""
             sw = 0.0
             for ch in block:
-                cw = 1.0 if ord(ch) > 0x2E80 else 0.5
+                cw = 2.0 if ord(ch) > 0x2E80 else 1.0
                 if seg and sw + cw > chars_per_line:
                     lines.append(seg)
                     seg, sw = "", 0.0

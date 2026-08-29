@@ -147,14 +147,14 @@ class NiumenPage:
     def _refresh_chips(self):
         """按查询名单前 3 个重建快捷按钮；长按从名单移除。
 
-        需求：名称强制单行（chars_per_line=8 字符宽，超长截断），
+        需求：名称强制单行（chars_per_line=16 字符宽=8 汉字，超长截断），
         避免 ETF 名称两行与单行名称（如澜起科技）混排高度不齐。
         """
         from .batch import name_display
         self.chips_row.clear_widgets()
         for item in self.app.watchlist.top(3):
             name = item["name"]
-            text, _lines = name_display(name, chars_per_line=8, max_lines=1)
+            text, _lines = name_display(name, chars_per_line=16, max_lines=1)
             b = MDRaisedButton(
                 text=text, size_hint_x=1, size_hint_y=None, height=dp(36),
                 md_bg_color=CHIP_BG, text_color=(1, 1, 1, 1),
