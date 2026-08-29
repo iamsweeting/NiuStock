@@ -260,12 +260,14 @@ class MarketPage:
                                  if errs else "")
 
     def _render_turnover(self, live):
-        # 两市成交额（沪深+北证）/ 本日预测额 / 较上日变化 —— 三行对齐（需求）
+        # A股成交额（沪深+北证）/ 本日预测额 / 较上日变化 —— 三行对齐（需求）
         t = live.get("turnover_yi")
         p = live.get("turnover_pred_yi")
         vp = live.get("turnover_vs_prev")
+        tdate = live.get("trade_date")
         rows = []
-        rows.append(("两市成交额", "%.0f 亿" % t if t else "—", _WHITE))
+        dlabel = ("A股成交额" if not tdate else "A股成交额 %s" % tdate[-5:])
+        rows.append((dlabel, "%.0f 亿" % t if t else "—", _WHITE))
         if p:
             rows.append(("本日预测额", "%.0f 亿（开市%d分钟，模型估算）" % (
                 p, int(market.elapsed_trade_minutes())), _GREEN))
@@ -372,6 +374,12 @@ class MarketPage:
                 text="暂无财经消息", font_style="Body2",
                 theme_text_color="Custom", text_color=_GREY, adaptive_height=True,
             ))
+        # 消息来源声明（需求）
+        self.news_card.add_widget(MDLabel(
+            text="消息来源：东方财富 7x24 快讯（新浪 7x24 备用）",
+            font_style="Caption", theme_text_color="Custom", text_color=_HINT,
+            adaptive_height=True,
+        ))
 
     def _render_hist_field(self, key, rows):
         """把单个历史小节替换为实际数据（标题 + 表头 + 数值行）。
@@ -475,7 +483,7 @@ def _hex(col):
 
 
 _HIST_TITLES = {
-    "turnover": "两市成交额（亿元）",
+    "turnover": "A股成交额（亿元，含北证）",
     "ccpr": "美元兑人民币中间价",
     "wti": "WTI原油（美元/桶）",
     "xau": "伦敦金（美元/盎司）",
