@@ -257,8 +257,8 @@ WEEK_NEWS_SMALL = (
 )
 
 
-# 过滤门槛：至少命中一个"重大词(+2)"（或两个预告词）才入选，剔除普通快讯
-WEEK_NEWS_MIN_SCORE = 2
+# 过滤门槛：至少命中一个"预告词(+1)"即可入选（原 MIN=2 导致新闻太少，需求放宽）
+WEEK_NEWS_MIN_SCORE = 1
 
 
 def _news_score(text):
@@ -280,13 +280,18 @@ _NO_BREAK_RE = None
 
 
 def split_news_title(text):
-    """拆新闻标题/正文：按第一个 ：:—— 拆分；无分隔符或标题为空返回 (None, None)。
+    """拆新闻标题/正文：按第一个 ：:—— 拆分。
 
-    需求：财经消息标题【标题】作链接、正文可换行；无标题的新闻直接忽略。
+    有分隔符 → (标题, 正文≤100字)；无分隔符 → 整条作为标题 (text, None)
+    （需求：新闻数量不能太少，无分隔符的新闻不再忽略）；
+    空文本返回 (None, None)。
     """
-    m = re.search(r"^(.*?)[：:—]+\s*(.*)$", str(text or ""), re.S)
-    if not m:
+    t = str(text or "").strip()
+    if not t:
         return None, None
+    m = re.search(r"^(.*?)[：:—]+\s*(.*)$", t, re.S)
+    if not m:
+        return t, None
     title = m.group(1).strip()
     body = m.group(2).strip()
     if not title:
