@@ -260,27 +260,27 @@ class MarketPage:
                                  if errs else "")
 
     def _render_turnover(self, live):
-        # 两市成交额（首行）+ 本日预测额（另起一行，需求）+ 较上日变化
+        # 两市成交额（沪深+北证）/ 本日预测额 / 较上日变化 —— 三行对齐（需求）
         t = live.get("turnover_yi")
         p = live.get("turnover_pred_yi")
         vp = live.get("turnover_vs_prev")
-        lines = []
-        if t:
-            lines.append("两市成交额：[color=%s]%.0f[/color] 亿" % (_hex(_RED), t))
-        else:
-            lines.append("两市成交额：—")
+        rows = []
+        rows.append(("两市成交额", "%.0f 亿" % t if t else "—", _WHITE))
         if p:
-            lines.append("本日预测额：[color=%s]%.0f[/color] 亿（开市%d分钟）"
-                         % (_hex(_GREEN), p, int(market.elapsed_trade_minutes())))
-        elif t:
-            lines.append("本日预测额：—")
-        if vp is not None and t:
-            # 中国股市风格：红涨绿降（较上日增加=红、减少=绿，需求）
-            vc = _RED if vp >= 0 else _GREEN
-            lines.append("较上日变化：[color=%s]%+.0f[/color] 亿"
-                         % (_hex(vc), vp))
+            rows.append(("本日预测额", "%.0f 亿（开市%d分钟，模型估算）" % (
+                p, int(market.elapsed_trade_minutes())), _GREEN))
         else:
-            lines.append("较上日变化：—")
+            rows.append(("本日预测额", "—", _GREEN))
+        if vp is not None and t:
+            vc = _RED if vp >= 0 else _GREEN
+            rows.append(("较上日变化", "%+.0f 亿" % vp, vc))
+        else:
+            rows.append(("较上日变化", "—", _GREY))
+        # 对齐：名称列固定宽 + 数值列（markup 着色）
+        lines = []
+        for name, val, col in rows:
+            lines.append("[color=%s]%s[/color]  %s"
+                         % (_hex(_HINT), name, "[color=%s]%s[/color]" % (_hex(col), val)))
         self.turnover_label.text = "\n".join(lines)
 
     def _render_quotes(self, quotes=None):

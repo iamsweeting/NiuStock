@@ -178,8 +178,7 @@ class MacroPage:
         aseries = ast.get("series", {})
         self._render_series_card(box, "伦敦金", amonths.get("gold", []),
                                  aseries.get("伦敦金", []), _AST_META["伦敦金"])
-        self._render_series_card(box, "中国10年国债", amonths.get("cn10y", []),
-                                 aseries.get("中国10年国债", []), _AST_META["中国10年国债"])
+        self._render_bond_card(box, amonths, aseries)
         self._render_series_card(box, "1年期LPR", amonths.get("lpr", []),
                                  aseries.get("1年期LPR", []), _AST_META["1年期LPR"])
         self._render_derived(box, market.derive_macro_assets(aseries, ast.get("extra", {})),
@@ -187,6 +186,40 @@ class MacroPage:
 
         box.add_widget(self._title("六、大宗商品与比特币（近12个月）"))
         self._render_commodity(d.get("commodity", {}), ast)
+
+    def _render_bond_card(self, box, amonths, aseries):
+        """中美国债收益率卡：中国/美国 各 10年/30年（月末值，近12月）。"""
+        card = MDCard(
+            orientation="vertical", padding=[dp(10), dp(6), dp(10), dp(6)],
+            radius=_CARD_RADIUS, elevation=0, size_hint_y=None, md_bg_color=_MAIN_BG,
+        )
+        card.bind(minimum_height=card.setter("height"))
+        for mk, name in (("cn10y", "中国10年国债"), ("cn30y", "中国30年国债"),
+                         ("us10y", "美国10年国债"), ("us30y", "美国30年国债")):
+            months = amonths.get(mk, [])
+            values = aseries.get(name, [])
+            line, latest = self._latest_line(name, months, values, _FMT_PCT3)
+            lb = MDLabel(text=line, markup=True, font_style="Body2", bold=True,
+                         theme_text_color="Custom", text_color=_WHITE, adaptive_height=True)
+            lb.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
+            card.add_widget(lb)
+            if months and values and latest is not None:
+                cells = []
+                for i in range(len(months) - 1, -1, -1):
+                    v = values[i]
+                    if v is None:
+                        continue
+                    cells.append("%s %s" % (market._month_short(months[i]), "%.3f" % v))
+                if cells:
+                    rows = ["   ".join(cells[j:j + 3]) for j in range(0, len(cells), 3)]
+                    ml = MDLabel(text="\n".join(rows), font_style="Caption",
+                                 theme_text_color="Custom", text_color=_GREY,
+                                 adaptive_height=True)
+                    ml.bind(width=lambda o, *a: setattr(o, "text_size", (o.width, None)))
+                    card.add_widget(ml)
+        card.add_widget(self._meaning_line(
+            "含义：无风险利率基准；中国收益率上行压制A股估值，美债收益率上行压制全球成长股"))
+        box.add_widget(card)
 
     def _render_group(self, box, months, series, meta, derived):
         """PMI 组：按 meta 顺序渲染指标块 + 派生块。"""
@@ -677,8 +710,6 @@ _LIQ_META = {
 _AST_META = {
     "伦敦金": ("伦敦金现货（美元/盎司，月末）",
               "避险资产；金价上涨反映避险/抗通胀情绪，股市风险偏好下降时同涨。", _FMT_GOLD),
-    "中国10年国债": ("中债10年期国债收益率（%）",
-                   "无风险利率基准，资产定价锚；上行压制股市估值，下行利好成长。", _FMT_PCT3),
     "1年期LPR": ("贷款市场报价利率 1 年期（%）",
                 "贷款基准利率，政策利率传导；下调利好地产/成长，上调则承压。", _FMT_PCT2),
 }
@@ -702,6 +733,9 @@ _DERIVE_META = {
         "通胀预期指数": {"formula": "CPI同比−PPI同比",
                          "meaning": "代表消费与生产价格剪刀差；走阔=下游利润改善，利好消费股。",
                          "fmt": _FMT_PCT1},
+        "PPI−PPIRM": {"formula": "PPI同比−PPIRM同比",
+                      "meaning": "出厂价减购进价增速差；走阔=中游利润改善，收窄=利润承压。",
+                      "fmt": _FMT_PCT1},
     },
     "liquidity": {
         "M1-M2剪刀差": {"formula": "M1同比−M2同比",

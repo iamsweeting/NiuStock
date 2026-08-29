@@ -491,7 +491,11 @@ def _pacing(prev, gap=0.25):
 # --------------------------------------------------------------------------
 
 def _sec_live_sina():
-    """实时①：新浪批量行情 + 两市成交额 + 本日预测额 + 较上日同时段变化。"""
+    """实时①：新浪批量行情 + 两市成交额(沪深+北证) + 本日预测额 + 较上日变化。
+
+    北证成交额取腾讯实时 bj899050（同花顺口径：A股成交额=沪深+北证）；
+    较上日变化用沪深对比（北证历史源不可得，避免 +162 亿虚高）。
+    """
     sess = _session()
     data = {"quotes": [], "errors": []}
     try:
@@ -511,14 +515,28 @@ def _sec_live_sina():
                 data["errors"].append("%s 无行情" % label)
         sh = amounts.get("sh000001")
         sz = amounts.get("sz399001")
+        # 北证成交额（腾讯实时 bj899050 f35 第三段=成交额元）
+        bj = None
+        try:
+            txt = _get_text(sess, "https://qt.gtimg.cn/q=bj899050",
+                            headers={"Referer": "https://gu.qq.com/"}, tries=2, pause=0.6)
+            m = re.search(r'v_bj899050="([^"]*)"', txt)
+            if m:
+                f = m.group(1).split("~")
+                if len(f) > 35:
+                    parts = f[35].split("/")
+                    if len(parts) >= 3:
+                        bj = _f(parts[2])
+        except Exception:  # noqa: BLE001
+            pass
         if sh and sz:
-            total = sh + sz
+            total = sh + sz + (bj or 0.0)
             data["turnover_yi"] = round(total / 1e8, 2)
             pred = _predict_turnover_model_or_linear(total)
             data["turnover_pred_yi"] = round(pred / 1e8, 2) if pred else None
-            # 较上日变化：今日成交额 - 上一交易日同时段累计成交额（需求）
-            data["turnover_vs_prev"] = _turnover_vs_prev_yi(total)
-        data["sources"] = {"新浪": True}
+            # 较上日变化：沪深对比（北证历史源不可得；含北证会虚高+162亿）
+            data["turnover_vs_prev"] = _turnover_vs_prev_yi(sh + sz)
+        data["sources"] = {"新浪": True, "腾讯": True}
     except Exception as e:  # noqa: BLE001
         data["errors"].append("新浪行情：%s" % e)
     return data
@@ -1387,11 +1405,18 @@ def _sec_macro_assets():
             sess, "RPTA_WEB_TREASURYYIELD", "ALL", sort="SOLAR_DATE",
             token=EM_TOKEN, extra={"pageSize": "500"},
             ref="https://data.eastmoney.com/cjsj/zmgzsyl.html"))
-        pairs = [(str(r.get("SOLAR_DATE", ""))[:10], _f(r.get("EMM00166466")))
-                 for r in rows if r.get("EMM00166466") not in (None, "")]
-        out = _monthly_last([p for p in pairs if p[1] > 0])
-        data["months"]["cn10y"] = [m for m, _v in out]
-        data["series"]["中国10年国债"] = [v for _m, v in out]
+        # 中美国债收益率：中国10年/30年、美国10年/30年（月末值）
+        for mk, emkey, name in (
+            ("cn10y", "EMM00166466", "中国10年国债"),
+            ("cn30y", "EMM00166469", "中国30年国债"),
+            ("us10y", "EMG00001310", "美国10年国债"),
+            ("us30y", "EMG00001312", "美国30年国债"),
+        ):
+            pairs = [(str(r.get("SOLAR_DATE", ""))[:10], _f(r.get(emkey)))
+                     for r in rows if r.get(emkey) not in (None, "")]
+            out = _monthly_last([p for p in pairs if p[1] > 0])
+            data["months"][mk] = [m for m, _v in out]
+            data["series"][name] = [v for _m, v in out]
         data["sources"]["东方财富"] = True
     except Exception as e:  # noqa: BLE001
         data["errors"].append("国债收益率：%s" % e)
@@ -1768,18 +1793,28 @@ def derive_macro_pmi(series):
 
 
 def derive_macro_inflation(series):
-    """通胀派生：通胀预期指数 = CPI同比 - PPI同比（最新两期对齐）。"""
+    """通胀派生：通胀预期指数=CPI同比−PPI同比；PPI−PPIRM剪刀差（利润方向）。
+
+    PPI（出厂价）−PPIRM（购进价）：剪刀差走阔=出厂价相对购进价上升，
+    中游企业利润改善；收窄=利润承压。
+    """
     cpi = series.get("CPI同比") or []
     ppi = series.get("PPI同比") or []
+    ppirm = series.get("PPIRM同比") or []
+    out = {}
     n = min(len(cpi), len(ppi))
-    if n == 0:
-        return {}
-    v = None
-    for i in range(n - 1, -1, -1):
-        if cpi[i] is not None and ppi[i] is not None:
-            v = cpi[i] - ppi[i]
-            break
-    return {"通胀预期指数": v}
+    if n:
+        for i in range(n - 1, -1, -1):
+            if cpi[i] is not None and ppi[i] is not None:
+                out["通胀预期指数"] = cpi[i] - ppi[i]
+                break
+    n2 = min(len(ppi), len(ppirm))
+    if n2:
+        for i in range(n2 - 1, -1, -1):
+            if ppi[i] is not None and ppirm[i] is not None:
+                out["PPI−PPIRM"] = ppi[i] - ppirm[i]
+                break
+    return out
 
 
 def derive_macro_liquidity(series):
