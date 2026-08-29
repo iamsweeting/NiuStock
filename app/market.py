@@ -534,9 +534,9 @@ def _sec_live_sina():
         if not (sh and sz):
             data["errors"].append("成交额数据缺失")
         else:
-            # 交易日信息：腾讯 day/query sh000001（最后交易日 + 前一日全天）
+            # 交易日信息：腾讯 day/query 沪深两市（最后交易日 + 前一日全天）
             try:
-                amts = _tx_amounts_full("sh000001", 3)
+                amts = _tx_turnover_days(3)
                 if len(amts) >= 2:
                     last_date, last_full = amts[-1]
                     prev_full = amts[-2][1]
@@ -640,7 +640,11 @@ def _sec_live_median():
 
 
 def _tx_day_query_raw(symbol, n=5):
-    """腾讯 day/query：返回 [(date8, [分钟串...])]，最近 n 个交易日（升序）。"""
+    """腾讯 day/query：返回 [(date8, [分钟串...])]，最近 n 个交易日（升序）。
+
+    实测（2026-08-29）：接口返回倒序（最新在前），这里统一排序为升序，
+    否则 out[-n:] 会取到最旧的 n 天（曾导致非交易日取到 08-24 而非 08-28）。
+    """
     sess = _session()
     url = TX_DAY_QUERY + "?code=" + symbol
     text = _get_text(sess, url, tries=2, pause=1.0)
@@ -653,6 +657,7 @@ def _tx_day_query_raw(symbol, n=5):
         recs = day.get("data") or []
         if recs:
             out.append((d, recs))
+    out.sort(key=lambda x: x[0])
     return out[-n:]
 
 
@@ -677,6 +682,18 @@ def _tx_amounts_full(symbol, n=5):
         if len(last) >= 4:
             out.append((d, float(last[3])))
     return out
+
+
+def _tx_turnover_days(n=5):
+    """沪深两市合计全天成交额：[(date8, 两市成交额元)] 最近 n 个交易日（升序）。
+
+    非交易日/盘前口径：A股成交额 = 上证 day/query + 深证 day/query + 北证实时。
+    """
+    days = {}
+    for sym in ("sh000001", "sz399001"):
+        for d, amt in _tx_amounts_full(sym, n):
+            days[d] = days.get(d, 0.0) + amt
+    return sorted(days.items())
 
 
 def _minute_elapsed(hhmm):
