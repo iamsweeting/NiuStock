@@ -358,12 +358,11 @@ def test_no_break_latin():
 
 
 def test_news_min_score_threshold():
-    # 门槛：至少命中一个重大词(+2)才入选（普通快讯剔除）
-    assert market.WEEK_NEWS_MIN_SCORE == 2
-    assert market._news_score("上证指数收盘微涨") >= 2        # 指数/大盘
-    assert market._news_score("某地天气晴好") < 2              # 无关消息
-    assert market._news_score("半导体板块资金流入") >= 2       # 半导体
-    assert market._news_score("券商股集体走强") >= 2           # 券商
+    # 门槛放宽：至少命中一个预告词(+1)即可入选（原 MIN=2 导致新闻太少，需求）
+    assert market.WEEK_NEWS_MIN_SCORE == 1
+    assert market._news_score("上证指数收盘微涨") >= 1        # 指数/大盘
+    assert market._news_score("半导体板块资金流入") >= 1       # 半导体
+    assert market._news_score("券商股集体走强") >= 1           # 券商
     # 小额新股仍被剔除
     assert market._news_score("某公司上市申购募资3亿") < 0
 
@@ -386,6 +385,22 @@ def test_parse_sina_7x24_keeps_time_order():
     assert texts[0] == "英伟达财报出炉"   # 时间最新在前（不因"央行"评分更高而重排）
     assert texts[1] == "央行降准0.5个百分点"
     assert "普通生活新闻" not in texts
+
+
+def test_split_news_title():
+    # 标题/正文拆分：按首个 ： : ——
+    assert market.split_news_title("英伟达发布财报：营收大增50%") == ("英伟达发布财报", "营收大增50%")
+    assert market.split_news_title("央行降准0.5个百分点——释放长期资金") == (
+        "央行降准0.5个百分点", "释放长期资金")
+    # 无分隔符 → 整条作为标题（不忽略，需求：新闻数量不能太少）
+    assert market.split_news_title("半导体ETF资金流入 规模创新高") == (
+        "半导体ETF资金流入 规模创新高", None)
+    assert market.split_news_title("：只有正文") == (None, None)                      # 无标题 → 忽略
+    assert market.split_news_title("") == (None, None)                                # 空 → 忽略
+    assert market.split_news_title("   ") == (None, None)
+    # 正文限制 100 字
+    t, b = market.split_news_title("标题：" + "正" * 200)
+    assert len(b) == 100
 
 
 def test_macro_cache_roundtrip(tmp_path):
