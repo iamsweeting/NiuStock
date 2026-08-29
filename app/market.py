@@ -383,7 +383,7 @@ def parse_em_fastnews(text, n=10):
         m = re.match(r"^【.*?】(.*)$", summary, re.S)
         if m:
             body = m.group(1).strip()
-        out.append((t, title, body[:100], ""))
+        out.append((t, title, body[:200], ""))   # 完整显示（仅防异常超长）
         if len(out) >= n:
             break
     return out
