@@ -75,11 +75,11 @@ android.ndk = 27b
 # ---- Release 签名（v1.5 起发布 release 版）----
 # 签名信息经环境变量注入 p4a（实测 buildozer 对 spec 的 android.keystore 系列键
 # 透传不可靠，日志报 "P4A_RELEASE_KEYSTORE missing"）：
-#   tools/docker_build.sh 构建前 export：
+#   tools/docker_build.sh 构建前 export（变量名以 p4a 源码为准）：
 #     P4A_RELEASE_KEYSTORE=/home/user/hostcwd/keystore/release.keystore
 #     P4A_RELEASE_KEYSTORE_PASSWD=nstock2026
-#     P4A_RELEASE_KEYSTORE_ALIAS=nstock
-#     P4A_RELEASE_KEYSTORE_ALIAS_PASSWD=nstock2026
+#     P4A_RELEASE_KEYALIAS=nstock
+#     P4A_RELEASE_KEYALIAS_PASSWD=nstock2026
 # 密钥：keystore/release.keystore（RSA-2048，有效期 30 年）。
 # 注意：release 签名与 debug 不同，真机从 debug 版升级需先卸载旧包
 # （INSTALL_FAILED_UPDATE_INCOMPATIBLE）。
