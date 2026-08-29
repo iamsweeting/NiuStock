@@ -39,6 +39,9 @@ SINA_GLOBAL_KLINE = ("https://stock2.finance.sina.com.cn/futures/api/jsonp.php/"
 # 新浪财经 7x24 快讯（zhibo feed：rich_text=消息主题全文，docurl=详情链接）——
 # "本周重大关注"数据源（需求：直接显示消息主题，不点链接也能看到内容）
 SINA_7X24 = "https://zhibo.sina.com.cn/api/zhibo/feed"
+# 东方财富 7x24 快讯（A股为主，结构化 title+summary，替代/回退新浪）
+EM_FASTNEWS = ("https://np-listapi.eastmoney.com/comm/web/getFastNewsList"
+               "?client=web&biz=web_724&fastColumn=102&sortEnd=&pageSize=20&req_trace=1")
 # 新浪财经要闻（滚动列表，备选源）
 SINA_ROLL_NEWS = "https://feed.mix.sina.com.cn/api/roll/get"
 CHINAMONEY_CCPR = "https://www.chinamoney.com.cn/ags/ms/cm-u-bk-ccpr/CcprHisNew"
@@ -239,7 +242,7 @@ WEEK_NEWS_PREVIEW = (
 )
 # 重大性加分：巨头/千亿级/权重/宏观大事 + 半导体/金融行业重大消息（需求）
 WEEK_NEWS_BIG = (
-    "千亿", "万亿", "巨头", "权重", "指数", "大盘", "龙头", "苹果", "微软",
+    "千亿", "万亿", "亿", "巨头", "权重", "指数", "大盘", "龙头", "苹果", "微软",
     "英伟达", "台积电", "特斯拉", "亚马逊", "谷歌", "Meta", "茅台", "宁德",
     "比亚迪", "中芯", "华为", "阿里", "腾讯", "平安", "工行", "建行", "中石油",
     "中石化", "联通", "移动", "电信", "中国船舶", "中远", "国家", "国务院",
@@ -312,7 +315,10 @@ def _no_break_latin(text):
         #   （"ETF）"、"10%，" 等边界防断行；\u00A0 显示为空格宽度）
         _NO_BREAK_RE = re.compile(
             r"([A-Za-z0-9%.\-+,./$¥:;])\s*([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef])")
-    out = _NO_BREAK_RE.sub(lambda m: m.group(1) + "\u00A0" + m.group(2), text or "")
+    # 所有普通空格 → \u00A0：Kivy 只在 0x20 空格断行，\u00A0 处不断
+    #（中文正文仍可在任意字符处断行，需求：题目之间有空格不换行）
+    out = str(text or "").replace(" ", "\u00A0")
+    out = _NO_BREAK_RE.sub(lambda m: m.group(1) + "\u00A0" + m.group(2), out)
     # 反向：汉字/全角标点 后紧跟 拉丁/数字（"指数ETF"、"：2026"）防断行
     _NO_BREAK_RE2 = re.compile(
         r"([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef])\s*([A-Za-z0-9%])")
@@ -345,6 +351,39 @@ def parse_sina_7x24(text, n=10):
         if _news_score(rt) < WEEK_NEWS_MIN_SCORE:
             continue
         out.append((ct, rt, str(it.get("docurl") or "")))
+        if len(out) >= n:
+            break
+    return out
+
+
+def parse_em_fastnews(text, n=10):
+    """解析东方财富 7x24 快讯 → [(时间, 标题, 正文≤100字, url)]。
+
+    元素：title=标题、summary=【标题】正文、showTime=时间；无详情链接。
+    正文 = summary 去掉【标题】前缀。
+    """
+    import json
+    try:
+        d = json.loads(text)
+        items = (d.get("data") or {}).get("fastNewsList") or []
+    except Exception:
+        return []
+    out = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        t = str(it.get("showTime") or "")[:16]
+        title = str(it.get("title") or "").strip()
+        summary = str(it.get("summary") or "").strip()
+        if not title:
+            continue
+        if _news_score(title + summary) < WEEK_NEWS_MIN_SCORE:
+            continue
+        body = summary
+        m = re.match(r"^【.*?】(.*)$", summary, re.S)
+        if m:
+            body = m.group(1).strip()
+        out.append((t, title, body[:100], ""))
         if len(out) >= n:
             break
     return out
@@ -791,21 +830,38 @@ def _sec_hist_wti():
 
 
 def _sec_week_news():
-    """四、本周重大关注：新浪 7x24 快讯 ≤5 条（主题全文 + 隐式链接）。
+    """四、财经消息：东方财富 7x24 快讯（A股为主，10 条，重大性过滤）。
 
-    多抓 60 条，优先筛"即将/本周/公布/上市/会议"等预告类消息（需求）。
+    东财快讯结构化 title+summary；失败回退新浪 7x24。
     """
     sess = _session()
     data = {"errors": []}
     try:
-        text = _get_text(sess, SINA_7X24, params={
-            "page": "1", "page_size": "60", "zhibo_id": "152",
-            "tag_id": "0", "dire": "f", "dpc": "1"},
-            headers={"Referer": "https://finance.sina.com.cn/"})
-        data["news"] = parse_sina_7x24(text)
-        data["sources"] = {"新浪": True}
+        text = _get_text(sess, EM_FASTNEWS, tries=2, pause=0.6,
+                         headers={"Referer": "https://kuaixun.eastmoney.com/"})
+        data["news"] = parse_em_fastnews(text)
+        data["sources"] = {"东方财富": True}
     except Exception as e:  # noqa: BLE001
-        data["errors"].append("本周关注：%s" % e)
+        data["errors"].append("东财快讯：%s" % e)
+        # 回退：新浪 7x24
+        try:
+            text = _get_text(sess, SINA_7X24, params={
+                "page": "1", "page_size": "60", "zhibo_id": "152",
+                "tag_id": "0", "dire": "f", "dpc": "1"},
+                headers={"Referer": "https://finance.sina.com.cn/"})
+            raw = parse_sina_7x24(text)
+            # 统一格式 (时间, 标题, 正文, url)
+            unified = []
+            for ct, rt, url in raw:
+                title, body = split_news_title(rt)
+                if not title:
+                    continue
+                unified.append((ct, title, body or "", url))
+            data["news"] = unified
+            data["sources"] = {"新浪": True}
+            data["errors"] = []
+        except Exception as e2:  # noqa: BLE001
+            data["errors"].append("新浪回退：%s" % e2)
     return data
 
 
