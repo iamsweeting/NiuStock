@@ -233,12 +233,16 @@ class BatchPage:
         self.on_calc()
 
     def _set_fill_active(self, which):
-        """「大盘/近期查询」互斥高亮：当前操作蓝色文字、另一灰色文字
-        （MDFlatButton 用 text_color，规避 MDRaisedButton 宽按钮背景在
-        Adreno 上不绘制的问题；与按日/按周一致）。"""
+        """「大盘/近期查询」互斥高亮：当前操作蓝色文字、另一灰色文字。
+
+        MDFlatButton 必须 theme_text_color="Custom" 后 text_color 才生效
+        （否则被主题 Primary 覆盖——此前版本大盘按钮不变灰的根因之一）。
+        """
         active = get_color_from_hex("#8ab4f8")
         idle = get_color_from_hex("#8a9199")
         try:
+            self._btn_market.theme_text_color = "Custom"
+            self._btn_recent.theme_text_color = "Custom"
             self._btn_market.text_color = active if which == "market" else idle
             self._btn_recent.text_color = active if which == "recent" else idle
         except Exception:  # noqa: BLE001
