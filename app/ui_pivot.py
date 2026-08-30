@@ -62,13 +62,16 @@ class _Cell(Label):
 
     def __init__(self, text="", color=(1, 1, 1, 1), bg=_BG_NONE,
                  bold=False, size_hint_x=1, on_copy=None, wrap=False, **kw):
-        # 自适应字号：优先按单元格宽度估算，未知宽度时按文本长度分级
-        # （含换行文本按最长行计；宽度按汉字=1、半角=0.5 折算，
-        #  避免 ETF 等英文让字号偏小）
+        # 自适应字号：
+        #  - 单行数值/代码（无换行）：按字符数估算（过去逻辑，小字号单行不换行）
+        #  - 换行名称（含 \n）：按最长行的显示宽度折算（汉字=1、半角=0.5）
         n = 0
-        for ln in (text.split("\n") if "\n" in text else [text]):
-            w = sum(1.0 if ord(c) > 0x2E80 else 0.5 for c in ln)
-            n = max(n, w)
+        if "\n" in text:
+            for ln in text.split("\n"):
+                w = sum(1.0 if ord(c) > 0x2E80 else 0.5 for c in ln)
+                n = max(n, w)
+        else:
+            n = len(text)
         w_dp = kw.get("width")
         if w_dp:
             w_dp = w_dp / dp(1)
